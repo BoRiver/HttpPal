@@ -1,5 +1,11 @@
 # HttpPal - JetBrains IDE 的 HTTP/WebSocket 客户端插件
 
+[English](README.md) | [中文](#readme_zh_cn)
+
+HttpPal 是一个为 JetBrains IDE 提供集成 API 测试功能的综合 HTTP/WebSocket 客户端插件，让开发者可以直接在开发环境中进行 API 测试。
+
+## 概述
+
 HttpPal 是一个为 JetBrains IDE 提供集成 API 测试功能的综合 HTTP/WebSocket 客户端插件，让开发者可以直接在开发环境中进行 API 测试。
 
 ## 功能特性
@@ -140,9 +146,38 @@ HttpPal 插件支持多种语言：
 
 插件会自动检测您的 IDE 语言设置并显示相应的界面语言。
 
+## 技术栈
+
+- **语言**: Kotlin (兼容 Java)
+- **构建工具**: Gradle 配合 `gradle-intellij-plugin`
+- **HTTP 客户端**: Java 11+ HttpClient 或 OkHttp
+- **并发处理**: `java.util.concurrent` 包
+- **UI 框架**: IntelliJ 平台 UI DSL
+- **代码分析**: IntelliJ PSI (程序结构接口)
+
+## 架构组件
+
+1. **核心引擎**: HTTP/WebSocket 通信处理
+2. **发现服务**: 自动 API 端点检测
+3. **UI 层**: ToolWindow 和表单组件
+4. **存储层**: 设置和历史持久化
+5. **环境管理器**: 多环境配置
+6. **并发执行器**: 并行请求执行
+
+## 安全考虑
+
+- 敏感头信息的安全存储
+- 认证令牌的加密持久化
+- 项目级别的安全隔离
+- 多用户环境中的凭证安全处理
+
+## 贡献
+
+我们欢迎贡献！请查看我们的贡献指南以获取更多信息。
+
 ## 许可证
 
-此插件基于 MIT 许可证授权。详情请参阅 LICENSE 文件。
+*(许可证信息待定)*
 
 ## 支持
 

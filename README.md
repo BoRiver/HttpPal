@@ -1,16 +1,14 @@
-# HttpPal Plugin / HttpPal 插件
+# HttpPal - HTTP/WebSocket Client Plugin for JetBrains IDE
 
-[English](#english) | [中文](#中文)
+[English](#readme) | [中文](README_zh_CN.md)
 
 ---
 
-## English
-
-### Overview
+## Overview
 
 HttpPal is a comprehensive HTTP/WebSocket client plugin for JetBrains IDEs (primarily IntelliJ IDEA) that provides developers with integrated API testing capabilities directly within their development environment.
 
-### Key Features
+## Key Features
 
 #### 🔍 **Automatic API Discovery**
 - Automatically scans Java projects to discover REST API endpoints
@@ -73,7 +71,7 @@ HttpPal is a comprehensive HTTP/WebSocket client plugin for JetBrains IDEs (prim
 - Environment integration for seamless JMeter compatibility
 - Direct integration with JMeter ecosystem for advanced load testing
 
-### Technical Stack
+## Technical Stack
 
 - **Language**: Kotlin (with Java compatibility)
 - **Build Tool**: Gradle with `gradle-intellij-plugin`
@@ -82,7 +80,7 @@ HttpPal is a comprehensive HTTP/WebSocket client plugin for JetBrains IDEs (prim
 - **UI Framework**: IntelliJ Platform UI DSL
 - **Code Analysis**: IntelliJ PSI (Program Structure Interface)
 
-### Architecture Components
+## Architecture Components
 
 1. **Core Engine**: HTTP/WebSocket communication handling
 2. **Discovery Service**: Automatic API endpoint detection
@@ -91,23 +89,108 @@ HttpPal is a comprehensive HTTP/WebSocket client plugin for JetBrains IDEs (prim
 5. **Environment Manager**: Multi-environment configuration
 6. **Concurrent Executor**: Parallel request execution
 
-### Security Considerations
+## Security Considerations
 
 - Secure storage for sensitive header information
 - Encrypted persistence for authentication tokens
 - Project-level security isolation
 - Safe handling of credentials in multi-user environments
 
-### Installation & Usage
+## Installation & Usage
 
-*(Coming soon - plugin will be available through JetBrains Plugin Marketplace)*
+1. Open your JetBrains IDE (IntelliJ IDEA, WebStorm, PyCharm, etc.)
+2. Go to **File** → **Settings** → **Plugins**
+3. Search for "HttpPal" in the marketplace
+4. Click **Install** and restart your IDE
 
-### Contributing
+## Quick Start
+
+### 1. Open HttpPal Tool Window
+- Use **Tools** → **HttpPal** → **Open HttpPal**
+- Or press `Ctrl+Alt+H` (Windows/Linux) / `Cmd+Alt+H` (Mac)
+
+### 2. Discover Endpoints
+- HttpPal automatically scans your project to find REST endpoints
+- Click **Refresh** to manually update the endpoint list
+- Double-click any endpoint to load it into the request form
+
+### 3. Configure Request
+- Select HTTP method, enter URL, add headers
+- Add request body for POST/PUT/PATCH requests
+- Configure timeout and redirect settings
+
+### 4. Send Request
+- Click **Send Request** to execute
+- View formatted response including headers and timing
+- Request is automatically added to history
+
+### 5. Export to JMeter
+- Click **Export to JMeter** to open the export dialog
+- Select single request, multiple requests, or concurrent scenario
+- Configure thread count and iterations for load testing
+- Save as .jmx file for use in Apache JMeter
+
+## Configuration
+
+### Environment Settings
+1. Go to **HttpPal** → **Manage Environments**
+2. Create environments for different deployment targets
+3. Set base URLs and global headers for each environment
+4. Switch between environments using the dropdown menu
+
+### Global Settings
+1. Go to **File** → **Settings** → **Tools** → **HttpPal**
+2. Configure default timeout, thread count, and other preferences
+3. Set global headers applied to all requests
+4. Configure history retention and favorites management
+
+## Keyboard Shortcuts
+
+| Action | Windows/Linux | Mac |
+|--------|---------------|-----|
+| Open HttpPal | `Ctrl+Alt+H` | `Cmd+Alt+H` |
+| Send Request | `Ctrl+Alt+S` | `Cmd+Alt+S` |
+| Refresh Endpoints | `Ctrl+Alt+R` | `Cmd+Alt+R` |
+| Open WebSocket | `Ctrl+Alt+W` | `Cmd+Alt+W` |
+| View History | `Ctrl+Alt+Y` | `Cmd+Alt+Y` |
+| Manage Environments | `Ctrl+Alt+E` | `Cmd+Alt+E` |
+| Export to JMeter | `Ctrl+Alt+J` | `Cmd+Alt+J` |
+| Quick Test Endpoint | `Ctrl+Shift+T` | `Cmd+Shift+T` |
+
+## Supported Frameworks
+
+### Spring Framework
+- Spring MVC controllers
+- Spring Boot REST controllers
+- Spring WebFlux (reactive endpoints)
+- Custom request mappings
+
+### JAX-RS
+- Jersey implementation
+- RESTEasy implementation
+- Apache CXF implementation
+- Custom JAX-RS providers
+
+## Internationalization Support
+
+The HttpPal plugin supports multiple languages:
+- **English**
+- **Simplified Chinese**
+- **Traditional Chinese**
+- **Japanese**
+
+The plugin automatically detects your IDE language settings and displays the corresponding interface language.
+
+## Contributing
 
 We welcome contributions! Please see our contributing guidelines for more information.
 
-### License
+## License
 
 *(License information to be determined)*
 
----
+## Support
+
+- **Documentation**: [https://httppal.com/docs](https://httppal.com/docs)
+- **Issue Tracker**: [https://github.com/httppal/httppal-plugin/issues](https://github.com/httppal/httppal-plugin/issues)
+- **Email**: support@httppal.com
