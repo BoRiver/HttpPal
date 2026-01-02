@@ -197,5 +197,5 @@ We welcome contributions! Please see our contributing guidelines for more inform
 
 ## Support
 
-- **Issue Tracker**: [https://github.com/httppal/httppal-plugin/issues](https://github.com/httppal/issues)
+- **Issue Tracker**: [https://github.com/httppal/issues](https://github.com/httppal/issues)
 - **Email**: zhangpjbo@gmail.com
