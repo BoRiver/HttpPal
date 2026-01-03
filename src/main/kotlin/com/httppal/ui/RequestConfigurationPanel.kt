@@ -19,6 +19,7 @@ import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.*
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
@@ -65,6 +66,9 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
     private val timeoutSpinner = JSpinner(SpinnerNumberModel(30, 1, 300, 1))
     private val followRedirectsCheckBox = JCheckBox(HttpPalBundle.message("form.request.follow.redirects"), true)
     
+    // Mock data generation service
+    private val mockDataGeneratorService = project.service<com.httppal.service.MockDataGeneratorService>()
+    
     // Concurrent execution components
     private val concurrentExecutionPanel = ConcurrentExecutionPanel(project)
     
@@ -74,9 +78,11 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
     private val sendButton = JButton(HttpPalBundle.message("request.send.button"))
     private val cancelButton = JButton(HttpPalBundle.message("button.cancel"))
     private val exportButton = JButton(HttpPalBundle.message("request.export.button"))
+    private val mockDataButton = JButton("Generate Mock Data")
     
     // State
     private var currentRequest: RequestConfig? = null
+    private var currentEndpoint: DiscoveredEndpoint? = null  // Store current endpoint for details display
     private var validationErrors: List<String>? = emptyList()
     private var lastValidationState: Boolean = true  // Track validation state changes
     private var onSendRequestCallback: ((RequestConfig) -> Unit)? = null
@@ -84,6 +90,10 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
     private var onCancelRequestCallback: (() -> Unit)? = null
     private var isRequestInProgress = false
     private var currentExecutionId: String? = null
+    
+    // Endpoint details panel
+    private val endpointDetailsPanel = JPanel()
+    private var endpointDetailsVisible = false
     
     init {
         setupUI()
@@ -114,6 +124,18 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         toolbar.setOnImportFromPostmanCallback {
             importFromPostman()
         }
+        
+        // Create main container panel
+        val mainContainer = JPanel(BorderLayout())
+        
+        // Create endpoint details panel (initially hidden)
+        endpointDetailsPanel.layout = BoxLayout(endpointDetailsPanel, BoxLayout.Y_AXIS)
+        endpointDetailsPanel.border = JBUI.Borders.compound(
+            JBUI.Borders.empty(5, 0, 10, 0),
+            JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0)
+        )
+        endpointDetailsPanel.isVisible = false
+        mainContainer.add(endpointDetailsPanel, BorderLayout.NORTH)
         
         // Create scrollable main panel
         val mainPanel = JPanel(GridBagLayout())
@@ -182,7 +204,9 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         scrollPane.border = JBUI.Borders.empty()
         scrollPane.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         scrollPane.horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-        add(scrollPane, BorderLayout.CENTER)
+        mainContainer.add(scrollPane, BorderLayout.CENTER)
+        
+        add(mainContainer, BorderLayout.CENTER)
         
         // Bottom panel with validation and send button
         val bottomPanel = createBottomPanel()
@@ -353,6 +377,18 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         com.httppal.util.VisualFeedbackHelper.addClickEffect(exportButton)
         com.httppal.util.VisualFeedbackHelper.addHoverEffect(exportButton)
         
+        // Mock data button
+        // Implements Task 12.1: Add "Generate Mock Data" button
+        mockDataButton.preferredSize = Dimension(160, 30)
+        mockDataButton.addActionListener { generateAndFillMockData() }
+        mockDataButton.toolTipText = "Generate mock data based on OpenAPI schema"
+        mockDataButton.isEnabled = false  // Initially disabled, enabled when endpoint with schema is selected
+        
+        // Add visual feedback to mock data button
+        com.httppal.util.VisualFeedbackHelper.addClickEffect(mockDataButton)
+        com.httppal.util.VisualFeedbackHelper.addHoverEffect(mockDataButton)
+        
+        buttonPanel.add(mockDataButton)
         buttonPanel.add(exportButton)
         buttonPanel.add(cancelButton)
         buttonPanel.add(sendButton)
@@ -769,6 +805,116 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         return concurrentExecutionPanel.isConcurrentExecutionEnabled()
     }
     
+    /**
+     * Update endpoint details panel with OpenAPI information
+     * Implements requirement 5.4: Display endpoint description, summary, tags, and operationId
+     */
+    private fun updateEndpointDetailsPanel(endpoint: DiscoveredEndpoint) {
+        // Clear existing content
+        endpointDetailsPanel.removeAll()
+        
+        // Check if endpoint has OpenAPI information
+        val hasOpenAPIInfo = endpoint.source == EndpointSource.OPENAPI && 
+            (endpoint.summary != null || endpoint.operationId != null || endpoint.tags.isNotEmpty())
+        
+        if (!hasOpenAPIInfo) {
+            endpointDetailsPanel.isVisible = false
+            endpointDetailsVisible = false
+            revalidate()
+            repaint()
+            return
+        }
+        
+        // Create details content panel
+        val detailsContent = JPanel()
+        detailsContent.layout = BoxLayout(detailsContent, BoxLayout.Y_AXIS)
+        detailsContent.border = JBUI.Borders.empty(8, 10, 8, 10)
+        detailsContent.background = JBColor(Color(245, 248, 250), Color(45, 48, 51))
+        
+        // Add OpenAPI indicator icon
+        val headerPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 0))
+        headerPanel.isOpaque = false
+        val openAPILabel = JBLabel("📋 OpenAPI Endpoint")
+        openAPILabel.font = openAPILabel.font.deriveFont(Font.BOLD, 12f)
+        openAPILabel.foreground = JBColor(Color(0, 102, 204), Color(88, 166, 255))
+        headerPanel.add(openAPILabel)
+        detailsContent.add(headerPanel)
+        detailsContent.add(Box.createVerticalStrut(8))
+        
+        // Display summary if available
+        endpoint.summary?.let { summary ->
+            val summaryPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2))
+            summaryPanel.isOpaque = false
+            val summaryLabel = JBLabel("<html><b>Summary:</b> $summary</html>")
+            summaryLabel.font = summaryLabel.font.deriveFont(12f)
+            summaryPanel.add(summaryLabel)
+            detailsContent.add(summaryPanel)
+        }
+        
+        // Display operationId if available
+        endpoint.operationId?.let { operationId ->
+            val operationIdPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2))
+            operationIdPanel.isOpaque = false
+            val operationIdLabel = JBLabel("<html><b>Operation ID:</b> <code>$operationId</code></html>")
+            operationIdLabel.font = operationIdLabel.font.deriveFont(11f)
+            operationIdLabel.foreground = JBColor.GRAY
+            operationIdPanel.add(operationIdLabel)
+            detailsContent.add(operationIdPanel)
+        }
+        
+        // Display tags if available
+        if (endpoint.tags.isNotEmpty()) {
+            val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2))
+            tagsPanel.isOpaque = false
+            val tagsLabel = JBLabel("<html><b>Tags:</b></html>")
+            tagsLabel.font = tagsLabel.font.deriveFont(11f)
+            tagsPanel.add(tagsLabel)
+            
+            // Add tag badges
+            endpoint.tags.forEach { tag ->
+                val tagBadge = JBLabel(" $tag ")
+                tagBadge.font = tagBadge.font.deriveFont(10f)
+                tagBadge.foreground = JBColor(Color(255, 255, 255), Color(200, 200, 200))
+                tagBadge.background = JBColor(Color(0, 122, 204), Color(70, 130, 180))
+                tagBadge.isOpaque = true
+                tagBadge.border = JBUI.Borders.empty(2, 6, 2, 6)
+                tagsPanel.add(tagBadge)
+            }
+            
+            detailsContent.add(tagsPanel)
+        }
+        
+        // Display OpenAPI file source if available
+        endpoint.openAPIFile?.let { file ->
+            val filePanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 2))
+            filePanel.isOpaque = false
+            val fileName = file.substringAfterLast('/')
+            val fileLabel = JBLabel("<html><b>Source:</b> <i>$fileName</i></html>")
+            fileLabel.font = fileLabel.font.deriveFont(10f)
+            fileLabel.foreground = JBColor.GRAY
+            filePanel.add(fileLabel)
+            detailsContent.add(filePanel)
+        }
+        
+        endpointDetailsPanel.add(detailsContent)
+        endpointDetailsPanel.isVisible = true
+        endpointDetailsVisible = true
+        
+        revalidate()
+        repaint()
+    }
+    
+    /**
+     * Hide endpoint details panel
+     */
+    private fun hideEndpointDetailsPanel() {
+        endpointDetailsPanel.isVisible = false
+        endpointDetailsVisible = false
+        endpointDetailsPanel.removeAll()
+        revalidate()
+        repaint()
+    }
+    
     private fun buildRequestConfig(): RequestConfig {
         val method = methodComboBox.selectedItem as HttpMethod
         var url = enhancedUrlField.getText().trim()  // Use enhancedUrlField instead of urlTextField
@@ -876,6 +1022,12 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
      * Implements requirement 3.2: populate request form when endpoint is selected
      */
     fun populateFromEndpoint(endpoint: DiscoveredEndpoint) {
+        // Store current endpoint
+        currentEndpoint = endpoint
+        
+        // Update endpoint details panel
+        updateEndpointDetailsPanel(endpoint)
+        
         methodComboBox.selectedItem = endpoint.method
         enhancedUrlField.setText(endpoint.path)  // Use enhancedUrlField instead of urlTextField
         
@@ -889,6 +1041,9 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
                 model.addRow(arrayOf(param.name, param.defaultValue ?: ""))
             }
         }
+        
+        // Enable mock data button if endpoint has schema info
+        mockDataButton.isEnabled = endpoint.schemaInfo != null || endpoint.parameters.isNotEmpty()
         
         // Set source
         requestSource = RequestSource.SCANNED_ENDPOINT
@@ -904,6 +1059,10 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
      * Implements requirement 2.1: allow specification of HTTP method, URL, headers, and request body
      */
     fun populateFromRequest(request: RequestConfig) {
+        // Clear current endpoint and hide details panel
+        currentEndpoint = null
+        hideEndpointDetailsPanel()
+        
         methodComboBox.selectedItem = request.method
         enhancedUrlField.setText(request.url)  // Use enhancedUrlField instead of urlTextField
         timeoutSpinner.value = request.timeout.seconds.toInt()
@@ -927,6 +1086,9 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         
         // Add empty row for new headers
         model.addRow(arrayOf("", ""))
+        
+        // Disable mock data button when no endpoint is selected
+        mockDataButton.isEnabled = false
         
         currentRequest = request
         validateForm()
@@ -1102,6 +1264,10 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
     fun createNewRequest(template: RequestTemplate? = null) {
         // Clear the form
         clearForm()
+        
+        // Clear current endpoint and hide details panel
+        currentEndpoint = null
+        hideEndpointDetailsPanel()
         
         // Apply template if provided
         if (template != null) {
@@ -1459,6 +1625,147 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
                     cause = e,
                     project = project,
                     component = this
+                )
+            }
+        }
+    }
+    
+    /**
+     * Generate and fill mock data based on current endpoint schema
+     * Implements Task 12.1 and 12.2: Generate mock data and fill form fields
+     */
+    private fun generateAndFillMockData() {
+        val endpoint = currentEndpoint
+        if (endpoint == null) {
+            ErrorHandler.handleValidationErrors(
+                listOf("No endpoint selected. Please select an endpoint first."),
+                this,
+                "Mock Data Generation Error"
+            )
+            return
+        }
+        
+        try {
+            // Generate mock data using MockDataGeneratorService
+            val mockData = mockDataGeneratorService.generateMockRequest(endpoint, endpoint.schemaInfo)
+            
+            // 在 EDT 线程中更新 UI
+            ApplicationManager.getApplication().invokeLater {
+                // Fill path parameters into URL
+                var url = enhancedUrlField.getText()
+                mockData.pathParameters.forEach { (name, value) ->
+                    url = url.replace("{$name}", value)
+                }
+                
+                // Fill query parameters into URL
+                if (mockData.queryParameters.isNotEmpty()) {
+                    val queryString = mockData.queryParameters.entries.joinToString("&") { (key, value) ->
+                        "$key=$value"
+                    }
+                    url = if (url.contains("?")) {
+                        "$url&$queryString"
+                    } else {
+                        "$url?$queryString"
+                    }
+                }
+                
+                // 更新 URL 字段
+                enhancedUrlField.setText(url)
+                
+                // Fill headers
+                val model = headersTable.model as DefaultTableModel
+                model.rowCount = 0
+                
+                mockData.headers.forEach { (name, value) ->
+                    model.addRow(arrayOf(name, value))
+                }
+                
+                // Add empty row for new headers
+                model.addRow(arrayOf("", ""))
+                
+                // 强制刷新表格
+                headersTable.revalidate()
+                headersTable.repaint()
+                
+                // Fill request body if available
+                mockData.body?.let { body ->
+                    // Format JSON for better readability
+                    val formattedBody = try {
+                        // Use Jackson for proper JSON formatting
+                        val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+                        val jsonNode = mapper.readTree(body)
+                        mapper.writerWithDefaultPrettyPrinter().writeValueAsString(jsonNode)
+                    } catch (e: Exception) {
+                        // Fallback to simple formatting
+                        body.replace(",", ",\n  ")
+                            .replace("{", "{\n  ")
+                            .replace("}", "\n}")
+                            .replace("[", "[\n  ")
+                            .replace("]", "\n]")
+                    }
+                    
+                    ApplicationManager.getApplication().runWriteAction {
+                        bodyEditor.document.setText(formattedBody)
+                    }
+                }
+                
+                // 强制刷新整个面板
+                revalidate()
+                repaint()
+                
+                // Show success feedback with details
+                val detailsMessage = buildString {
+                    append("Mock data generated successfully!\n")
+                    if (mockData.pathParameters.isNotEmpty()) {
+                        append("• Path params: ${mockData.pathParameters.size}\n")
+                    }
+                    if (mockData.queryParameters.isNotEmpty()) {
+                        append("• Query params: ${mockData.queryParameters.size}\n")
+                    }
+                    if (mockData.headers.isNotEmpty()) {
+                        append("• Headers: ${mockData.headers.size}\n")
+                    }
+                    if (mockData.body != null) {
+                        append("• Request body: Generated")
+                    }
+                }
+                
+                com.httppal.util.VisualFeedbackHelper.showSuccessFeedback(mockDataButton as JComponent)
+                com.httppal.util.VisualFeedbackHelper.showTemporaryStatus(
+                    validationLabel,
+                    detailsMessage.trim(),
+                    3000,
+                    Color(0, 150, 0)
+                )
+                
+                // Validate form after filling
+                validateForm()
+                
+                LoggingUtils.logWithContext(
+                    LoggingUtils.LogLevel.INFO,
+                    "Mock data generated and filled successfully",
+                    mapOf(
+                        "endpoint" to endpoint.path,
+                        "method" to endpoint.method.name,
+                        "hasBody" to (mockData.body != null),
+                        "headerCount" to mockData.headers.size,
+                        "pathParamCount" to mockData.pathParameters.size,
+                        "queryParamCount" to mockData.queryParameters.size
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            ErrorHandler.handleError(
+                message = "Failed to generate mock data",
+                cause = e,
+                project = project,
+                component = this
+            )
+            
+            ApplicationManager.getApplication().invokeLater {
+                com.httppal.util.VisualFeedbackHelper.showErrorFeedback(
+                    mockDataButton as JComponent,
+                    "Failed to generate mock data: ${e.message}"
                 )
             }
         }

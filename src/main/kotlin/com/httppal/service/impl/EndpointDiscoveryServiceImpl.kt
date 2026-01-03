@@ -232,6 +232,23 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                             LoggingUtils.logWarning("No endpoints found! Java files: ${javaFiles.size}, Kotlin files: ${kotlinFiles.size}")
                         }
                         
+                        // 集成 OpenAPI 端点
+                        try {
+                            val openAPIService = project.getService(com.httppal.service.OpenAPIDiscoveryService::class.java)
+                            if (openAPIService != null) {
+                                val openAPIEndpoints = openAPIService.parseAllOpenAPIFiles()
+                                allEndpoints.addAll(openAPIEndpoints)
+                                
+                                LoggingUtils.logWithContext(
+                                    LoggingUtils.LogLevel.INFO,
+                                    "Added OpenAPI endpoints",
+                                    mapOf<String, Any>("openAPIEndpoints" to openAPIEndpoints.size)
+                                )
+                            }
+                        } catch (e: Exception) {
+                            LoggingUtils.logError("Failed to discover OpenAPI endpoints", e)
+                        }
+                        
                         return@withErrorHandling allEndpoints
                     } ?: emptyList()
                 }
@@ -572,6 +589,23 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
     ): DiscoveredEndpoint? {
         val annotations = method.annotations
         
+        // 提取 OpenAPI @Operation 注解信息
+        var operationSummary: String? = null
+        var operationDescription: String? = null
+        var operationId: String? = null
+        
+        val operationAnnotation = annotations.find { 
+            it.qualifiedName == "io.swagger.v3.oas.annotations.Operation" 
+        }
+        if (operationAnnotation != null) {
+            operationSummary = extractAnnotationStringValue(operationAnnotation, "summary")
+            operationDescription = extractAnnotationStringValue(operationAnnotation, "description")
+            operationId = extractAnnotationStringValue(operationAnnotation, "operationId")
+        }
+        
+        // 提取类级别的 @Tag 注解
+        val classTags = extractTagsFromClass(psiClass)
+        
         for (annotation in annotations) {
             val annotationName = annotation.qualifiedName?.substringAfterLast('.') ?: continue
             
@@ -589,7 +623,11 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                         methodName = method.name,
                         parameters = parameters,
                         sourceFile = file.virtualFile?.path ?: file.name,
-                        lineNumber = getLineNumber(method)
+                        lineNumber = getLineNumber(method),
+                        source = com.httppal.model.EndpointSource.CODE_SCAN,
+                        operationId = operationId,
+                        summary = operationSummary ?: operationDescription,
+                        tags = classTags
                     )
                 }
             }
@@ -607,7 +645,11 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                     methodName = method.name,
                     parameters = parameters,
                     sourceFile = file.virtualFile?.path ?: file.name,
-                    lineNumber = getLineNumber(method)
+                    lineNumber = getLineNumber(method),
+                    source = com.httppal.model.EndpointSource.CODE_SCAN,
+                    operationId = operationId,
+                    summary = operationSummary ?: operationDescription,
+                    tags = classTags
                 )
             }
         }
@@ -804,6 +846,23 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
         method.parameterList.parameters.forEach { parameter ->
             val annotations = parameter.annotations
             
+            // 提取 OpenAPI @Parameter 注解信息
+            var paramDescription: String? = null
+            var paramExample: String? = null
+            var paramRequired: Boolean? = null
+            
+            val openApiParamAnnotation = annotations.find {
+                it.qualifiedName == "io.swagger.v3.oas.annotations.Parameter"
+            }
+            if (openApiParamAnnotation != null) {
+                paramDescription = extractAnnotationStringValue(openApiParamAnnotation, "description")
+                paramExample = extractAnnotationStringValue(openApiParamAnnotation, "example")
+                val requiredValue = openApiParamAnnotation.findAttributeValue("required")
+                if (requiredValue != null) {
+                    paramRequired = requiredValue.text == "true"
+                }
+            }
+            
             // Check for path parameters
             val pathVariableAnnotation = annotations.find { 
                 it.qualifiedName?.endsWith("PathVariable") == true 
@@ -813,9 +872,12 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 parameters.add(EndpointParameter(
                     name = paramName,
                     type = ParameterType.PATH,
-                    required = true,
-                    dataType = parameter.type.presentableText
+                    required = paramRequired ?: true,
+                    dataType = parameter.type.presentableText,
+                    description = paramDescription,
+                    example = paramExample
                 ))
+                return@forEach
             }
             
             // Check for query parameters
@@ -824,13 +886,16 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
             }
             if (requestParamAnnotation != null) {
                 val paramName = extractValueFromAnnotation(requestParamAnnotation) ?: parameter.name
-                val required = extractRequiredFromAnnotation(requestParamAnnotation)
+                val required = paramRequired ?: extractRequiredFromAnnotation(requestParamAnnotation)
                 parameters.add(EndpointParameter(
                     name = paramName,
                     type = ParameterType.QUERY,
                     required = required,
-                    dataType = parameter.type.presentableText
+                    dataType = parameter.type.presentableText,
+                    description = paramDescription,
+                    example = paramExample
                 ))
+                return@forEach
             }
             
             // Check for header parameters
@@ -839,13 +904,16 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
             }
             if (requestHeaderAnnotation != null) {
                 val paramName = extractValueFromAnnotation(requestHeaderAnnotation) ?: parameter.name
-                val required = extractRequiredFromAnnotation(requestHeaderAnnotation)
+                val required = paramRequired ?: extractRequiredFromAnnotation(requestHeaderAnnotation)
                 parameters.add(EndpointParameter(
                     name = paramName,
                     type = ParameterType.HEADER,
                     required = required,
-                    dataType = parameter.type.presentableText
+                    dataType = parameter.type.presentableText,
+                    description = paramDescription,
+                    example = paramExample
                 ))
+                return@forEach
             }
             
             // Check for request body
@@ -856,9 +924,12 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 parameters.add(EndpointParameter(
                     name = parameter.name ?: "body",
                     type = ParameterType.BODY,
-                    required = true,
-                    dataType = parameter.type.presentableText
+                    required = paramRequired ?: true,
+                    dataType = parameter.type.presentableText,
+                    description = paramDescription,
+                    example = paramExample
                 ))
+                return@forEach
             }
         }
         
@@ -1053,6 +1124,32 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 )
             }
         }
+    }
+    
+    /**
+     * 从注解中提取字符串值
+     */
+    private fun extractAnnotationStringValue(annotation: PsiAnnotation, attributeName: String): String? {
+        val value = annotation.findAttributeValue(attributeName)
+        return value?.text?.removeSurrounding("\"")
+    }
+    
+    /**
+     * 从类中提取 @Tag 注解的名称
+     */
+    private fun extractTagsFromClass(psiClass: PsiClass): List<String> {
+        val tags = mutableListOf<String>()
+        
+        psiClass.annotations.forEach { annotation ->
+            if (annotation.qualifiedName == "io.swagger.v3.oas.annotations.tags.Tag") {
+                val tagName = extractAnnotationStringValue(annotation, "name")
+                if (tagName != null) {
+                    tags.add(tagName)
+                }
+            }
+        }
+        
+        return tags
     }
     
     fun dispose() {

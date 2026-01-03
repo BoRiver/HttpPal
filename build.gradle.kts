@@ -54,6 +54,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
 
+    // OpenAPI parsing
+    implementation("io.swagger.parser.v3:swagger-parser:2.1.22")
+    
+    // Mock data generation
+    implementation("net.datafaker:datafaker:2.1.0")
+
     // Testing dependencies
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
     testImplementation("io.kotest:kotest-assertions-core:5.9.1")

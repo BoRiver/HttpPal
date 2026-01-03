@@ -97,10 +97,13 @@ data class EndpointInfo(
 }
 
 /**
- * Source of the endpoint (discovered from code or manually created)
+ * Source of the endpoint (discovered from code, OpenAPI file, or manually created)
  */
 enum class EndpointSource {
-    DISCOVERED, MANUAL
+    CODE_SCAN,      // 从代码扫描发现
+    OPENAPI,        // 从 OpenAPI 文件发现
+    MANUAL,         // 手动创建
+    DISCOVERED      // 保留向后兼容（等同于 CODE_SCAN）
 }
 
 /**

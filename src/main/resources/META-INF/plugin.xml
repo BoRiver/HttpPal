@@ -72,6 +72,12 @@
                        serviceImplementation="com.httppal.service.impl.EndpointDiscoveryServiceImpl"/>
         <projectService serviceInterface="com.httppal.service.EnvironmentService"
                        serviceImplementation="com.httppal.service.impl.EnvironmentServiceImpl"/>
+        <projectService serviceInterface="com.httppal.service.OpenAPIDiscoveryService"
+                       serviceImplementation="com.httppal.service.impl.OpenAPIDiscoveryServiceImpl"/>
+        <projectService serviceInterface="com.httppal.service.SchemaAnalyzerService"
+                       serviceImplementation="com.httppal.service.impl.SchemaAnalyzerServiceImpl"/>
+        <projectService serviceInterface="com.httppal.service.MockDataGeneratorService"
+                       serviceImplementation="com.httppal.service.impl.MockDataGeneratorServiceImpl"/>
         
         <!-- Tool Window -->
         <toolWindow id="HttpPal" 
@@ -92,6 +98,7 @@
         
         <!-- Notification Groups -->
         <notificationGroup id="HttpPal.Plugin" displayType="BALLOON" key="httppal.notifications"/>
+        <notificationGroup id="HttpPal.Notifications" displayType="BALLOON" key="httppal.notifications"/>
         
         <!-- File Type Associations - Removed as it's not needed for this plugin -->
         

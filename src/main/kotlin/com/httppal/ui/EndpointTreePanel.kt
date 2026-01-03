@@ -919,8 +919,16 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
             
             when (userObject) {
                 is DiscoveredEndpoint -> {
-                    text = "${userObject.method.name} ${userObject.path}"
-                    icon = getMethodIcon(userObject.method)
+                    // 根据来源添加前缀标识
+                    val sourcePrefix = when (userObject.source) {
+                        com.httppal.model.EndpointSource.OPENAPI -> "[OpenAPI] "
+                        com.httppal.model.EndpointSource.CODE_SCAN -> "[Code] "
+                        com.httppal.model.EndpointSource.DISCOVERED -> "[Code] "
+                        com.httppal.model.EndpointSource.MANUAL -> "[Manual] "
+                    }
+                    
+                    text = "$sourcePrefix${userObject.method.name} ${userObject.path}"
+                    icon = getMethodIcon(userObject.method, userObject.source)
                     toolTipText = buildEndpointTooltip(userObject)
                     
                     // Customize appearance for endpoint nodes
@@ -962,20 +970,20 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
             return this
         }
         
-        private fun getMethodIcon(method: HttpMethod): Icon? {
+        private fun getMethodIcon(method: HttpMethod, source: com.httppal.model.EndpointSource = com.httppal.model.EndpointSource.CODE_SCAN): Icon? {
             // Create improved colored icons for different HTTP methods
             return when (method) {
-                HttpMethod.GET -> createMethodIcon(Color(41, 121, 255)) // Better blue
-                HttpMethod.POST -> createMethodIcon(Color(220, 90, 10)) // Better orange
-                HttpMethod.PUT -> createMethodIcon(Color(255, 150, 0)) // Better orange
-                HttpMethod.DELETE -> createMethodIcon(Color(220, 50, 50)) // Better red
-                HttpMethod.PATCH -> createMethodIcon(Color(180, 80, 220)) // Better purple
-                HttpMethod.HEAD -> createMethodIcon(Color(100, 100, 100)) // Gray
-                HttpMethod.OPTIONS -> createMethodIcon(Color(80, 180, 80)) // Green
+                HttpMethod.GET -> createMethodIcon(Color(41, 121, 255), source) // Better blue
+                HttpMethod.POST -> createMethodIcon(Color(220, 90, 10), source) // Better orange
+                HttpMethod.PUT -> createMethodIcon(Color(255, 150, 0), source) // Better orange
+                HttpMethod.DELETE -> createMethodIcon(Color(220, 50, 50), source) // Better red
+                HttpMethod.PATCH -> createMethodIcon(Color(180, 80, 220), source) // Better purple
+                HttpMethod.HEAD -> createMethodIcon(Color(100, 100, 100), source) // Gray
+                HttpMethod.OPTIONS -> createMethodIcon(Color(80, 180, 80), source) // Green
             }
         }
         
-        private fun createMethodIcon(color: Color): Icon {
+        private fun createMethodIcon(color: Color, source: com.httppal.model.EndpointSource = com.httppal.model.EndpointSource.CODE_SCAN): Icon {
             return object : Icon {
                 override fun paintIcon(c: Component?, g: Graphics?, x: Int, y: Int) {
                     g?.let {
@@ -1019,15 +1027,51 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
             tooltip.append("<html><div style='padding: 5px;'>")
             tooltip.append("<b style='color: #2979FF;'>${endpoint.method.name}</b> ")
             tooltip.append("<span style='color: #333;'>${endpoint.path}</span><br/>")
-            tooltip.append("<div style='margin-top: 8px;'><b>Class:</b> ${endpoint.className}</div>")
+            
+            // 显示来源
+            val sourceText = when (endpoint.source) {
+                com.httppal.model.EndpointSource.OPENAPI -> "OpenAPI File"
+                com.httppal.model.EndpointSource.CODE_SCAN -> "Code Scan"
+                com.httppal.model.EndpointSource.DISCOVERED -> "Code Scan"
+                com.httppal.model.EndpointSource.MANUAL -> "Manual"
+            }
+            tooltip.append("<div style='margin-top: 8px;'><b>Source:</b> $sourceText</div>")
+            
+            // 显示 summary（如果有）
+            if (endpoint.summary != null) {
+                tooltip.append("<div style='margin-top: 4px;'><b>Summary:</b> ${endpoint.summary}</div>")
+            }
+            
+            // 显示 operationId（如果有）
+            if (endpoint.operationId != null) {
+                tooltip.append("<div style='margin-top: 4px;'><b>Operation ID:</b> ${endpoint.operationId}</div>")
+            }
+            
+            // 显示 tags（如果有）
+            if (endpoint.tags.isNotEmpty()) {
+                tooltip.append("<div style='margin-top: 4px;'><b>Tags:</b> ${endpoint.tags.joinToString(", ")}</div>")
+            }
+            
+            tooltip.append("<div style='margin-top: 4px;'><b>Class:</b> ${endpoint.className}</div>")
             tooltip.append("<div style='margin-top: 4px;'><b>Method:</b> ${endpoint.methodName}</div>")
             tooltip.append("<div style='margin-top: 4px;'><b>File:</b> ${endpoint.sourceFile.substringAfterLast('/')}</div>")
-            tooltip.append("<div style='margin-top: 4px;'><b>Line:</b> ${endpoint.lineNumber}</div>")
+            
+            if (endpoint.lineNumber > 0) {
+                tooltip.append("<div style='margin-top: 4px;'><b>Line:</b> ${endpoint.lineNumber}</div>")
+            }
             
             if (endpoint.parameters.isNotEmpty()) {
                 tooltip.append("<div style='margin-top: 8px;'><b>Parameters:</b></div>")
                 endpoint.parameters.forEach { param ->
-                    tooltip.append("<div style='margin-left: 10px; margin-top: 2px;'>• ${param.getDisplayName()}</div>")
+                    val paramInfo = StringBuilder()
+                    paramInfo.append("• ${param.getDisplayName()}")
+                    if (param.description != null) {
+                        paramInfo.append(" - ${param.description}")
+                    }
+                    if (param.example != null) {
+                        paramInfo.append(" (e.g., ${param.example})")
+                    }
+                    tooltip.append("<div style='margin-left: 10px; margin-top: 2px;'>$paramInfo</div>")
                 }
             }
             
