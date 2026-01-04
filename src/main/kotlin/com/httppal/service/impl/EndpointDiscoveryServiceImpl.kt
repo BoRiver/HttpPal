@@ -601,6 +601,17 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
             operationSummary = extractAnnotationStringValue(operationAnnotation, "summary")
             operationDescription = extractAnnotationStringValue(operationAnnotation, "description")
             operationId = extractAnnotationStringValue(operationAnnotation, "operationId")
+        } else {
+            // Try Swagger 2 @ApiOperation
+            val apiOperationAnnotation = annotations.find {
+                it.qualifiedName == "io.swagger.annotations.ApiOperation"
+            }
+            if (apiOperationAnnotation != null) {
+                operationSummary = extractAnnotationStringValue(apiOperationAnnotation, "value")
+                operationDescription = extractAnnotationStringValue(apiOperationAnnotation, "notes")
+                // nickname is sometimes used as operationId in Swagger 2
+                operationId = extractAnnotationStringValue(apiOperationAnnotation, "nickname")
+            }
         }
         
         // 提取类级别的 @Tag 注解
@@ -615,13 +626,22 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 val path = extractPathFromSpringAnnotation(annotation, classPath)
                 val parameters = extractParametersFromJavaMethod(method)
                 
+                // Extract Swagger 2 @ApiImplicitParams
+                val implicitParams = extractImplicitParameters(method)
+                
+                // Extract Swagger 3 @Parameters (method level)
+                val commonParams = extractCommonParameters(method)
+                
+                // Merge parameters: implicit/common params can enrich or add to existing params
+                val mergedParameters = mergeParameters(parameters, implicitParams, commonParams)
+                
                 if (httpMethod != null && path != null) {
                     return DiscoveredEndpoint(
                         method = httpMethod,
                         path = path,
                         className = psiClass.qualifiedName ?: psiClass.name ?: "Unknown",
                         methodName = method.name,
-                        parameters = parameters,
+                        parameters = mergedParameters,
                         sourceFile = file.virtualFile?.path ?: file.name,
                         lineNumber = getLineNumber(method),
                         source = com.httppal.model.EndpointSource.CODE_SCAN,
@@ -861,6 +881,19 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 if (requiredValue != null) {
                     paramRequired = requiredValue.text == "true"
                 }
+            } else {
+                // Try Swagger 2 @ApiParam
+                val apiParamAnnotation = annotations.find {
+                    it.qualifiedName == "io.swagger.annotations.ApiParam"
+                }
+                if (apiParamAnnotation != null) {
+                    paramDescription = extractAnnotationStringValue(apiParamAnnotation, "value")
+                    paramExample = extractAnnotationStringValue(apiParamAnnotation, "example")
+                    val requiredValue = apiParamAnnotation.findAttributeValue("required")
+                    if (requiredValue != null) {
+                        paramRequired = requiredValue.text == "true"
+                    }
+                }
             }
             
             // Check for path parameters
@@ -868,7 +901,11 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 it.qualifiedName?.endsWith("PathVariable") == true 
             }
             if (pathVariableAnnotation != null) {
-                val paramName = extractValueFromAnnotation(pathVariableAnnotation) ?: parameter.name
+                var paramName = extractValueFromAnnotation(pathVariableAnnotation)
+                if (paramName.isNullOrBlank()) {
+                    paramName = parameter.name
+                }
+                
                 parameters.add(EndpointParameter(
                     name = paramName,
                     type = ParameterType.PATH,
@@ -885,7 +922,10 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 it.qualifiedName?.endsWith("RequestParam") == true 
             }
             if (requestParamAnnotation != null) {
-                val paramName = extractValueFromAnnotation(requestParamAnnotation) ?: parameter.name
+                var paramName = extractValueFromAnnotation(requestParamAnnotation)
+                if (paramName.isNullOrBlank()) {
+                    paramName = parameter.name
+                }
                 val required = paramRequired ?: extractRequiredFromAnnotation(requestParamAnnotation)
                 parameters.add(EndpointParameter(
                     name = paramName,
@@ -903,7 +943,10 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 it.qualifiedName?.endsWith("RequestHeader") == true 
             }
             if (requestHeaderAnnotation != null) {
-                val paramName = extractValueFromAnnotation(requestHeaderAnnotation) ?: parameter.name
+                var paramName = extractValueFromAnnotation(requestHeaderAnnotation)
+                if (paramName.isNullOrBlank()) {
+                    paramName = parameter.name
+                }
                 val required = paramRequired ?: extractRequiredFromAnnotation(requestHeaderAnnotation)
                 parameters.add(EndpointParameter(
                     name = paramName,
@@ -1137,6 +1180,153 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
     /**
      * 从类中提取 @Tag 注解的名称
      */
+    /**
+     * Merge parameters from different sources.
+     * Priority: Method Arguments < Implicit Params/Common Params (Enrichment)
+     */
+    private fun mergeParameters(
+        methodParams: List<EndpointParameter>,
+        implicitParams: List<EndpointParameter>,
+        commonParams: List<EndpointParameter>
+    ): List<EndpointParameter> {
+        val merged = methodParams.toMutableList()
+        val additionalParams = implicitParams + commonParams
+        
+        additionalParams.forEach { additional ->
+            val existingIndex = merged.indexOfFirst { it.name == additional.name }
+            if (existingIndex != -1) {
+                // Enrich existing parameter
+                val existing = merged[existingIndex]
+                merged[existingIndex] = existing.copy(
+                    description = existing.description ?: additional.description,
+                    example = existing.example ?: additional.example,
+                    required = if (existing.required) true else additional.required, // specific logic could be debated
+                    dataType = if (existing.dataType == "Object" || existing.dataType == null) additional.dataType else existing.dataType
+                )
+            } else {
+                // Add new parameter if it's a valid type (path/query/header/body)
+                // Implicit params often define things not in signature (like headers)
+                merged.add(additional)
+            }
+        }
+        return merged
+    }
+
+    private fun extractImplicitParameters(method: PsiMethod): List<EndpointParameter> {
+        val parameters = mutableListOf<EndpointParameter>()
+        
+        val implicitParamsAnnotation = method.annotations.find { 
+            it.qualifiedName == "io.swagger.annotations.ApiImplicitParams" 
+        } ?: return parameters
+
+        val valueAttr = implicitParamsAnnotation.findAttributeValue("value")
+        if (valueAttr is com.intellij.psi.PsiArrayInitializerMemberValue) {
+            valueAttr.initializers.forEach { initializer ->
+                if (initializer is PsiAnnotation) {
+                     parameters.addNotNull(parseApiImplicitParam(initializer))
+                }
+            }
+        } else if (valueAttr is PsiAnnotation) {
+             parameters.addNotNull(parseApiImplicitParam(valueAttr))
+        }
+
+        return parameters
+    }
+
+    private fun parseApiImplicitParam(annotation: PsiAnnotation): EndpointParameter? {
+        val name = extractAnnotationStringValue(annotation, "name") ?: return null
+        val value = extractAnnotationStringValue(annotation, "value") // description
+        val defaultValue = extractAnnotationStringValue(annotation, "defaultValue")
+        val required = annotation.findAttributeValue("required")?.text == "true"
+        val dataType = extractAnnotationStringValue(annotation, "dataType")
+        val paramType = extractAnnotationStringValue(annotation, "paramType")
+        val example = extractAnnotationStringValue(annotation, "example")
+
+        val type = when (paramType?.lowercase()) {
+            "path" -> ParameterType.PATH
+            "query" -> ParameterType.QUERY
+            "header" -> ParameterType.HEADER
+            "body" -> ParameterType.BODY
+            "form" -> ParameterType.BODY // Form data is body
+            else -> return null // Ignore unknown types
+        }
+
+        return EndpointParameter(
+            name = name,
+            type = type,
+            required = required,
+            dataType = dataType ?: "String",
+            description = value,
+            example = example ?: defaultValue
+        )
+    }
+
+    private fun extractCommonParameters(method: PsiMethod): List<EndpointParameter> {
+        val parameters = mutableListOf<EndpointParameter>()
+        // To be implemented for Swagger 3 @Parameters if needed, currently focusing on @ApiImplicitParams
+        // Swagger 3 usually uses @Parameter inline or @Parameters wrapper
+        
+        val parametersAnnotation = method.annotations.find {
+            it.qualifiedName == "io.swagger.v3.oas.annotations.Parameters"
+        }
+        
+        if (parametersAnnotation != null) {
+             val valueAttr = parametersAnnotation.findAttributeValue("value")
+             if (valueAttr is com.intellij.psi.PsiArrayInitializerMemberValue) {
+                valueAttr.initializers.forEach { initializer ->
+                    if (initializer is PsiAnnotation) {
+                         parameters.addNotNull(parseSwagger3Parameter(initializer))
+                    }
+                }
+            }
+        }
+        
+        // Also check for repeatable @Parameter annotation on method (if supported by libraries/compiler)
+        // Usually @Parameters is the container
+        
+        return parameters
+    }
+
+    private fun parseSwagger3Parameter(annotation: PsiAnnotation): EndpointParameter? {
+        val name = extractAnnotationStringValue(annotation, "name") ?: return null
+        val description = extractAnnotationStringValue(annotation, "description")
+        val example = extractAnnotationStringValue(annotation, "example")
+        val required = annotation.findAttributeValue("required")?.text == "true"
+        
+        // In Swagger 3, `in` determines the type (query, path, header, cookie)
+        val inType = extractAnnotationEnumName(annotation, "in")
+        
+        val type = when (inType?.lowercase()) {
+            "path" -> ParameterType.PATH
+            "query" -> ParameterType.QUERY
+            "header" -> ParameterType.HEADER
+            "cookie" -> ParameterType.HEADER // Treat cookie as header for now or ignore
+            else -> return null // Default or unknown? If 'in' is missing, it's ambiguous.
+        }
+
+        return EndpointParameter(
+            name = name,
+            type = type,
+            required = required,
+            dataType = "String", // Hard to get type from annotation unless schema is parsed
+            description = description,
+            example = example
+        )
+    }
+    
+    private fun extractAnnotationEnumName(annotation: PsiAnnotation, attributeName: String): String? {
+        val value = annotation.findAttributeValue(attributeName)
+        // Value is usually a reference expression like ParameterIn.QUERY
+        if (value is com.intellij.psi.PsiReferenceExpression) {
+            return value.referenceName
+        }
+        return null
+    }
+
+    private fun <T> MutableList<T>.addNotNull(element: T?) {
+        if (element != null) add(element)
+    }
+
     private fun extractTagsFromClass(psiClass: PsiClass): List<String> {
         val tags = mutableListOf<String>()
         
@@ -1145,6 +1335,26 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 val tagName = extractAnnotationStringValue(annotation, "name")
                 if (tagName != null) {
                     tags.add(tagName)
+                }
+            } else if (annotation.qualifiedName == "io.swagger.annotations.Api") {
+                // Swagger 2 @Api(tags = {"..."}) or @Api(value = "...")
+                val tagsValue = annotation.findAttributeValue("tags")
+                if (tagsValue != null && tagsValue.text != "{}") {
+                    // Handle array of tags or single tag
+                    val text = tagsValue.text.removeSurrounding("{", "}").trim()
+                    if (text.isNotBlank()) {
+                        text.split(",").forEach { 
+                            tags.add(it.trim().removeSurrounding("\"")) 
+                        }
+                    }
+                }
+                
+                // Fallback to value if tags is empty
+                if (tags.isEmpty()) {
+                    val value = extractAnnotationStringValue(annotation, "value")
+                    if (!value.isNullOrBlank()) {
+                        tags.add(value)
+                    }
                 }
             }
         }

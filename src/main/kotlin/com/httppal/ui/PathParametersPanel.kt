@@ -1,5 +1,6 @@
 package com.httppal.ui
 
+import com.httppal.model.EndpointParameter
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -72,8 +73,11 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
         
         // Configure column widths
         val columnModel = table.columnModel
-        columnModel.getColumn(0).preferredWidth = 150  // Parameter name
-        columnModel.getColumn(1).preferredWidth = 250  // Value
+        columnModel.getColumn(0).preferredWidth = 100  // Parameter name
+        columnModel.getColumn(1).preferredWidth = 200  // Value
+        columnModel.getColumn(2).preferredWidth = 80   // Type
+        columnModel.getColumn(3).preferredWidth = 60   // Required
+        columnModel.getColumn(4).preferredWidth = 150  // Description
         
         // Make parameter name column non-editable (display only)
         // Value column is editable
@@ -86,13 +90,19 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
         val matches = pathParamPattern.findAll(url)
         val paramNames = matches.map { it.groupValues[1] }.toList()
         
-        // Preserve existing values for params that still exist
-        val existingParams = getParameters()
+        // Preserve existing values/metadata for params that still exist
+        val existingParams = tableModel.getAllParameters().associateBy { it.name }
         
         tableModel.clear()
         paramNames.forEach { name ->
-            val existingValue = existingParams[name] ?: ""
-            tableModel.addRow(PathParameter(name, existingValue))
+            val existing = existingParams[name]
+            tableModel.addRow(PathParameter(
+                name = name, 
+                value = existing?.value ?: "",
+                description = existing?.description ?: "",
+                required = existing?.required ?: true,
+                type = existing?.type ?: "String"
+            ))
         }
         
         updateVisibility()
@@ -113,6 +123,28 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
             tableModel.setParameterValue(name, value)
         }
         onParametersChanged?.invoke(getParameters())
+        onParametersChanged?.invoke(getParameters())
+    }
+
+    /**
+     * Set parameters from list of EndpointParameter objects (to include descriptions)
+     */
+    fun setParametersList(params: List<EndpointParameter>) {
+        params.forEach { param ->
+            val existingValue = tableModel.getParameterValue(param.name)
+            tableModel.udpateOrAddParameter(
+                PathParameter(
+                    name = param.name,
+                    value = if (existingValue.isNotBlank()) existingValue else (param.defaultValue ?: ""),
+                    description = param.description ?: "",
+                    required = param.required,
+                    type = param.dataType ?: "String"
+                )
+            )
+        }
+        if (params.isNotEmpty()) {
+            updateVisibility()
+        }
     }
     
     /**
@@ -167,19 +199,26 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
      */
     data class PathParameter(
         val name: String,
-        var value: String = ""
+        var value: String = "",
+        var description: String = "",
+        var required: Boolean = true,
+        var type: String = "String"
     )
     
     /**
      * Table model for path parameters
      */
     private inner class PathParametersTableModel : AbstractTableModel() {
-        private val columns = arrayOf("Parameter", "Value")
+        private val columns = arrayOf("Parameter", "Value", "Type", "Required", "Description")
         private val data = mutableListOf<PathParameter>()
         
         override fun getRowCount(): Int = data.size
         override fun getColumnCount(): Int = columns.size
         override fun getColumnName(column: Int): String = columns[column]
+        
+        override fun getColumnClass(columnIndex: Int): Class<*> {
+            return if (columnIndex == 3) Boolean::class.java else String::class.java
+        }
         
         override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean {
             // Only value column is editable
@@ -189,8 +228,11 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any? {
             val row = data[rowIndex]
             return when (columnIndex) {
-                0 -> "{${row.name}}"  // Display with braces for clarity
+                0 -> row.name // User requested remove {}
                 1 -> row.value
+                2 -> row.type
+                3 -> row.required
+                4 -> row.description
                 else -> null
             }
         }
@@ -228,6 +270,27 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
             return data.associate { it.name to it.value }
         }
         
+        fun getParameterValue(name: String): String {
+            return data.find { it.name == name }?.value ?: ""
+        }
+
+        fun udpateOrAddParameter(param: PathParameter) {
+            val existingIndex = data.indexOfFirst { it.name == param.name }
+            if (existingIndex != -1) {
+                val existing = data[existingIndex]
+                data[existingIndex] = existing.copy(
+                    value = if (existing.value.isBlank()) param.value else existing.value,
+                    description = if (existing.description.isBlank()) param.description else existing.description,
+                    required = param.required,
+                    type = param.type
+                )
+                fireTableRowsUpdated(existingIndex, existingIndex)
+            } else {
+                data.add(param)
+                fireTableRowsInserted(data.size - 1, data.size - 1)
+            }
+        }
+
         fun getAllParameters(): List<PathParameter> = data.toList()
     }
 }

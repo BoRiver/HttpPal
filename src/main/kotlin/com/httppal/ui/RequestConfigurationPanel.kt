@@ -1157,23 +1157,38 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         clearAllHeaders()
         
         // Add parameters to panels/headers
-        endpoint.parameters.forEach { param ->
-            when (param.type) {
-                ParameterType.HEADER -> {
-                    val model = headersTable.model as DefaultTableModel
-                    model.addRow(arrayOf(param.name, param.defaultValue ?: ""))
-                }
-                ParameterType.QUERY -> {
-                    // Update query params panel if needed (usually synced from URL)
-                }
-                ParameterType.PATH -> {
-                    // Update path params panel values if default exists
-                    if (param.defaultValue != null) {
-                        pathParametersPanel.setParameters(mapOf(param.name to param.defaultValue))
-                    }
-                }
-                else -> {}
-            }
+        // Separate parameters by type
+        val pathParams = endpoint.parameters.filter { it.type == ParameterType.PATH }
+        val queryParams = endpoint.parameters.filter { it.type == ParameterType.QUERY }
+        val headerParams = endpoint.parameters.filter { it.type == ParameterType.HEADER }
+        
+        // Update Path Parameters Panel (merges with existing extracted from URL)
+        pathParametersPanel.setParametersList(pathParams)
+        
+        // Update Query Parameters Panel (merges with existing)
+        val uiQueryParams = queryParams.map { 
+             com.httppal.ui.QueryParametersPanel.QueryParameter(
+                 enabled = true,
+                 key = it.name,
+                 value = it.defaultValue ?: it.example ?: "",
+                 description = it.description ?: ""
+             )
+        }
+        queryParametersPanel.mergeParametersList(uiQueryParams)
+
+        // Update Headers
+        headerParams.forEach { param ->
+             val model = headersTable.model as DefaultTableModel
+             // Check if header already exists
+             var exists = false
+             for (i in 0 until model.rowCount) {
+                 if (model.getValueAt(i, 0) == param.name) {
+                     exists = true; break
+                 }
+             }
+             if (!exists) {
+                model.insertRow(0, arrayOf(param.name, param.defaultValue ?: param.example ?: ""))
+             }
         }
         
         // Enable mock data button if endpoint has schema info

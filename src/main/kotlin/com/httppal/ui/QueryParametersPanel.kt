@@ -127,6 +127,22 @@ class QueryParametersPanel(private val project: Project) : JPanel(BorderLayout()
         tableModel.addEmptyRow()
         fireParametersChanged()
     }
+
+    /**
+     * Merge parameters list into existing parameters (updates description, default values)
+     */
+    fun mergeParametersList(params: List<QueryParameter>) {
+        params.forEach { param ->
+            tableModel.updateOrAddParameter(param)
+        }
+        // Ensure there is always an empty row at end
+        if (tableModel.rowCount == 0 || tableModel.getAllParameters().isNotEmpty()) {
+             // Simple fix: Remove empty rows then add one.
+             tableModel.removeEmptyRows()
+             tableModel.addEmptyRow()
+        }
+        fireParametersChanged()
+    }
     
     /**
      * Parse query parameters from URL and populate table
@@ -312,6 +328,30 @@ class QueryParametersPanel(private val project: Project) : JPanel(BorderLayout()
             data.clear()
             if (size > 0) {
                 fireTableRowsDeleted(0, size - 1)
+            }
+        }
+        
+        fun removeEmptyRows() {
+            val toRemove = mutableListOf<Int>()
+            for (i in 0 until data.size) {
+                 if (data[i].key.isBlank() && data[i].value.isBlank() && data[i].description.isBlank()) {
+                     toRemove.add(i)
+                 }
+            }
+            toRemove.sortedDescending().forEach { removeRow(it) }
+        }
+
+        fun updateOrAddParameter(param: QueryParameter) {
+            val existingIndex = data.indexOfFirst { it.key == param.key }
+            if (existingIndex != -1) {
+                // Enrich existing
+                val existing = data[existingIndex]
+                existing.description = if (existing.description.isBlank()) param.description else existing.description
+                existing.value = if (existing.value.isBlank()) param.value else existing.value
+                fireTableRowsUpdated(existingIndex, existingIndex)
+            } else {
+                data.add(param)
+                fireTableRowsInserted(data.size - 1, data.size - 1)
             }
         }
         
