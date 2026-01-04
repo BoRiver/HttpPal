@@ -1,10 +1,8 @@
 package com.httppal.ui
 
-import com.httppal.util.HttpPalBundle
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import java.awt.*
@@ -34,29 +32,33 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
     }
     
     private fun setupUI() {
-        border = JBUI.Borders.compound(
-            JBUI.Borders.empty(5),
-            JBUI.Borders.customLineTop(com.intellij.ui.JBColor.border())
-        )
+        border = JBUI.Borders.empty(5, 0)
         
-        // Title label
-        val titlePanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0))
+        // Title label for better section separation
+        val titlePanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 5))
+        titlePanel.isOpaque = false
         val titleLabel = JBLabel("Path Parameters")
         titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, 12f)
+        titleLabel.foreground = com.intellij.ui.JBColor.namedColor("Label.infoForeground", com.intellij.ui.JBColor.gray)
         titlePanel.add(titleLabel)
         add(titlePanel, BorderLayout.NORTH)
         
         // Content panel with CardLayout to switch between table and empty message
         val contentPanel = JPanel(CardLayout())
+        contentPanel.isOpaque = false
         
-        // Table view
+        // Table view - use a more reasonable preferred height and ensure it can stretch
         val tableScrollPane = JBScrollPane(table)
-        tableScrollPane.preferredSize = Dimension(400, 100)
+        tableScrollPane.preferredSize = Dimension(-1, 120) // Give it a bit more height
+        tableScrollPane.minimumSize = Dimension(-1, 80)
+        tableScrollPane.border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1, 0, 1, 0)
         contentPanel.add(tableScrollPane, "table")
         
         // Empty message view
-        val emptyPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        emptyLabel.foreground = Color.GRAY
+        val emptyPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 5))
+        emptyPanel.isOpaque = false
+        emptyLabel.foreground = com.intellij.ui.JBColor.GRAY
+        emptyLabel.font = emptyLabel.font.deriveFont(Font.ITALIC)
         emptyPanel.add(emptyLabel)
         contentPanel.add(emptyPanel, "empty")
         

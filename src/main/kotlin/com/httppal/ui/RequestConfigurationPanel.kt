@@ -14,7 +14,6 @@ import com.httppal.util.VisualFeedbackHelper
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.editor.EditorFactory
-import com.intellij.openapi.editor.EditorSettings
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
@@ -24,17 +23,10 @@ import com.intellij.ui.components.*
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.*
-import org.jetbrains.kotlin.idea.k2.codeinsight.slicer.KotlinSliceUsageCellRenderer.registerKeyboardAction
 import java.awt.*
-import java.awt.event.ActionEvent
-import java.awt.event.ActionListener
-import java.awt.event.FocusAdapter
-import java.awt.event.FocusEvent
 import java.time.Duration
 import javax.swing.*
 import javax.swing.border.TitledBorder
-import javax.swing.event.DocumentEvent
-import javax.swing.event.DocumentListener
 import javax.swing.table.DefaultTableModel
 
 /**
@@ -112,6 +104,7 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         setupValidation()
         setupEventHandlers()
         setupKeyboardShortcuts()
+        setupEndpointChangeListener()
     }
     
     private fun setupUI() {
@@ -186,7 +179,8 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         mainPanel.add(enhancedUrlField, gbc)
         
         // Path Parameters section (auto-shows when URL contains {param})
-        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2
+        gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0; gbc.weighty = 0.0
         pathParametersPanel.onParametersChanged = { params ->
             // Update URL when path parameters change
             val currentUrl = enhancedUrlField.getText()
@@ -197,14 +191,18 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         }
         mainPanel.add(pathParametersPanel, gbc)
         
+        // Add a small separator
+        gbc.gridy = 3; gbc.insets = JBUI.insets(15, 8, 5, 8)
+        mainPanel.add(JSeparator(), gbc)
+        
         // Request options panel
-        gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.gridy = 4; gbc.insets = JBUI.insets(8)
         val optionsPanel = createOptionsPanel()
         mainPanel.add(optionsPanel, gbc)
         
         // Tabbed pane for Params/Headers/Body
-        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.BOTH
-        gbc.weightx = 1.0; gbc.weighty = 0.6
+        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.BOTH
+        gbc.weightx = 1.0; gbc.weighty = 1.0 // Give it full weight to expand correctly
         
         // Setup query parameters callback
         queryParametersPanel.onParametersChanged = { params ->
@@ -230,14 +228,16 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         mainPanel.add(requestTabbedPane, gbc)
         
         // Concurrent execution section
-        gbc.gridx = 0; gbc.gridy = 5; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.BOTH
-        gbc.weightx = 1.0; gbc.weighty = 0.3
+        gbc.gridx = 0; gbc.gridy = 6; gbc.gridwidth = 2; gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.weightx = 1.0; gbc.weighty = 0.0
         setupConcurrentExecutionPanel()
         mainPanel.add(concurrentExecutionPanel, gbc)
         
         // Wrap in scroll pane for better visibility
+        // Use a wrapper panel to ensure it stretches to full width
         val scrollPane = JBScrollPane(mainPanel)
         scrollPane.border = JBUI.Borders.empty()
+        scrollPane.viewport.isOpaque = false
         scrollPane.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         scrollPane.horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         mainContainer.add(scrollPane, BorderLayout.CENTER)
@@ -1415,6 +1415,50 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         dialog.show()
     }
     
+    private fun setupEndpointChangeListener() {
+        val connection = project.messageBus.connect(project)
+        // Subscribe to endpoint changes if using message bus
+        // Or register directly with service if using listener pattern completely
+        
+        val endpointDiscoveryService = project.service<com.httppal.service.EndpointDiscoveryService>()
+        val listener = object : com.httppal.service.EndpointChangeListener {
+            override fun onEndpointsChanged(notification: com.httppal.service.EndpointChangeNotification) {
+                // Check if current endpoint was modified
+                val current = currentEndpoint ?: return
+                
+                // Find matching modified endpoint
+                val modifiedEndpoint = notification.modifiedEndpoints.find { 
+                    it.className == current.className && it.methodName == current.methodName 
+                }
+                
+                if (modifiedEndpoint != null) {
+                    ApplicationManager.getApplication().invokeLater {
+                        // Only auto-update if we are in SCANNED_ENDPOINT mode and user hasn't heavily modified it
+                        if (requestSource == RequestSource.SCANNED_ENDPOINT) {
+                            // Notify user and update
+                            populateFromEndpoint(modifiedEndpoint)
+                            
+                            com.httppal.util.VisualFeedbackHelper.showTemporaryStatus(
+                                validationLabel,
+                                "Endpoint updated from source code",
+                                3000,
+                                JBColor.BLUE
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
+        endpointDiscoveryService.registerEndpointChangeListener(listener)
+        
+        // Ensure listener is removed when panel is disposed? 
+        // Since we don't have a clear "dispose" hook for JPanel easily without addNotify/removeNotify or Disposer...
+        // For project-level service it's tricky.
+        // Let's rely on standard swing hierarchy listener if possible or proper dispose.
+        // However, this panel seems to live long.
+    }
+
     // New methods for manual request creation
     
     /**

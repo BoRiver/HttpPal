@@ -86,7 +86,7 @@ class MockDataGeneratorServiceImpl(private val project: Project) : MockDataGener
         
         // 根据数据类型生成
         return when (param.dataType?.lowercase()) {
-            "integer", "int" -> random.nextInt(1, 100).toString()
+            "integer", "int", "long" -> random.nextInt(1, 100).toString()
             "number", "float", "double" -> random.nextDouble(1.0, 100.0).toString()
             "boolean" -> random.nextBoolean().toString()
             else -> faker.lorem().word()

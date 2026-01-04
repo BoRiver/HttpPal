@@ -41,11 +41,13 @@ class QueryParametersPanel(private val project: Project) : JPanel(BorderLayout()
     }
     
     private fun setupUI() {
-        border = JBUI.Borders.empty(5)
+        border = JBUI.Borders.empty(5, 0)
         
         // Table scroll pane
         val scrollPane = JBScrollPane(table)
-        scrollPane.preferredSize = Dimension(400, 150)
+        scrollPane.preferredSize = Dimension(-1, 150)
+        scrollPane.minimumSize = Dimension(-1, 100)
+        scrollPane.border = JBUI.Borders.customLine(JBColor.border(), 1, 0, 1, 0)
         add(scrollPane, BorderLayout.CENTER)
         
         // Control buttons panel

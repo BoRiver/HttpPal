@@ -4,9 +4,6 @@ import com.httppal.util.HttpPalBundle
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.JBColor
-import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
@@ -36,19 +33,23 @@ class FormDataPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
     
     private fun setupUI() {
-        border = JBUI.Borders.empty(5)
+        border = JBUI.Borders.empty(5, 0)
         
         // Header with info
         val headerPanel = JPanel(BorderLayout())
+        headerPanel.isOpaque = false
+        headerPanel.border = JBUI.Borders.empty(0, 5, 5, 5)
         val infoLabel = JLabel("Add form fields and files for multipart/form-data requests")
-        infoLabel.foreground = Color.GRAY
-        infoLabel.font = infoLabel.font.deriveFont(11f)
+        infoLabel.foreground = com.intellij.ui.JBColor.GRAY
+        infoLabel.font = infoLabel.font.deriveFont(Font.ITALIC, 11f)
         headerPanel.add(infoLabel, BorderLayout.WEST)
         add(headerPanel, BorderLayout.NORTH)
         
-        // Table
+        // Table - use flexible height
         val scrollPane = JBScrollPane(table)
-        scrollPane.preferredSize = Dimension(500, 200)
+        scrollPane.preferredSize = Dimension(-1, 200)
+        scrollPane.minimumSize = Dimension(-1, 120)
+        scrollPane.border = JBUI.Borders.customLine(com.intellij.ui.JBColor.border(), 1, 0, 1, 0)
         add(scrollPane, BorderLayout.CENTER)
         
         // Control buttons
