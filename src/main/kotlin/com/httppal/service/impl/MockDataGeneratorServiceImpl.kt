@@ -8,6 +8,8 @@ import com.httppal.util.PerformanceMonitor
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import net.datafaker.Faker
+import com.intellij.psi.*
+import com.intellij.psi.search.GlobalSearchScope
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -94,11 +96,104 @@ class MockDataGeneratorServiceImpl(private val project: Project) : MockDataGener
     }
     
     private fun generateDefaultBody(param: EndpointParameter): String {
+        // If we have a fully qualified type, try to resolve it and generate deep mock data
+        if (!param.qualifiedType.isNullOrBlank() && param.qualifiedType != "java.lang.Object") {
+             val psiClass = JavaPsiFacade.getInstance(project).findClass(
+                 param.qualifiedType,
+                 GlobalSearchScope.allScope(project)
+             )
+             
+             if (psiClass != null) {
+                 val mockData = generateFromPsiClass(psiClass, 0)
+                 if (mockData != null) {
+                     return try {
+                         objectMapper.writeValueAsString(mockData) ?: "{}"
+                     } catch (e: Exception) {
+                         "{}"
+                     }
+                 }
+             }
+        }
+        
         return when (param.dataType?.lowercase()) {
             "object" -> "{}"
             "array" -> "[]"
             else -> "\"\""
         }
+    }
+    
+    private fun generateFromPsiClass(psiClass: PsiClass, depth: Int): Any? {
+        if (depth > 5) return null // Prevent infinite recursion
+        
+        val result = mutableMapOf<String, Any?>()
+        
+        // Iterate over fields including inherited ones (if we want robust support, allFields is good)
+        val fields = psiClass.allFields
+        
+        for (field in fields) {
+            if (field.hasModifierProperty(PsiModifier.STATIC) || field.hasModifierProperty(PsiModifier.TRANSIENT)) {
+                continue
+            }
+            
+            val fieldName = field.name
+            val type = field.type
+            
+            result[fieldName] = generateValueForType(type, depth)
+        }
+        
+        return result
+    }
+
+    private fun generateValueForType(type: PsiType, depth: Int): Any? {
+         val canonicalText = type.canonicalText
+         
+         // Handle basic types
+         when (canonicalText) {
+             "java.lang.String", "String" -> return faker.lorem().word()
+             "java.lang.Integer", "int", "Integer" -> return random.nextInt(1, 100)
+             "java.lang.Long", "long", "Long" -> return random.nextLong(1, 1000)
+             "java.lang.Boolean", "boolean", "Boolean" -> return random.nextBoolean()
+             "java.lang.Double", "double", "Double" -> return random.nextDouble(1.0, 100.0)
+             "java.util.Date", "java.sql.Date", "Date" -> return LocalDate.now().toString()
+             "java.math.BigDecimal" -> return random.nextDouble(1.0, 1000.0)
+         }
+         
+         // Handle Lists/Collections
+         if (type is PsiClassType) {
+             val resolveResult = type.resolve()
+             if (resolveResult != null) {
+                 val qName = resolveResult.qualifiedName
+                 if (qName != null) {
+                      if (qName.startsWith("java.util.List") || qName.startsWith("java.util.Set") || qName.startsWith("java.util.Collection")) {
+                          // Try to get generic type
+                          val parameters = type.parameters
+                          if (parameters.isNotEmpty()) {
+                              val genericType = parameters[0]
+                              val item = generateValueForType(genericType, depth + 1)
+                              return if (item != null) listOf(item) else emptyList<Any>()
+                          }
+                          return emptyList<Any>()
+                      }
+                      if (qName.startsWith("java.util.Map")) {
+                          return mapOf("key" to "value")
+                      }
+                     // Recursive POJO
+                     if (!qName.startsWith("java.")) {
+                         return generateFromPsiClass(resolveResult, depth + 1)
+                     }
+                 }
+                 
+
+             }
+         }
+         
+         // Handle Arrays
+         if (type is PsiArrayType) {
+             val item = generateValueForType(type.componentType, depth + 1)
+             return if (item != null) listOf(item) else emptyList<Any>()
+         }
+         
+         return null
     }
 
     

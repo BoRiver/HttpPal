@@ -8,8 +8,8 @@ import java.util.*
  */
 data class FavoriteRequest(
     val id: String = UUID.randomUUID().toString(),
-    val name: String,
-    val request: RequestConfig,
+    val name: String = "",
+    val request: RequestConfig = RequestConfig(),
     val tags: List<String> = emptyList(),
     val createdAt: Instant = Instant.now(),
     val lastUsed: Instant? = null,

@@ -354,15 +354,29 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         val topPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 5))
         topPanel.add(JBLabel("Body type:"))
         
-        bodyTypeComboBox.addActionListener {
-            val cardLayout = bodyCardPanel.layout as CardLayout
-            when (bodyTypeComboBox.selectedItem as String) {
-                "none" -> cardLayout.show(bodyCardPanel, "none")
-                "raw" -> cardLayout.show(bodyCardPanel, "raw")
-                "form-data" -> cardLayout.show(bodyCardPanel, "form-data")
+            bodyTypeComboBox.addActionListener {
+                val cardLayout = bodyCardPanel.layout as CardLayout
+                val selected = bodyTypeComboBox.selectedItem as String
+                when (selected) {
+                    "none" -> cardLayout.show(bodyCardPanel, "none")
+                    "raw" -> cardLayout.show(bodyCardPanel, "raw")
+                    "form-data" -> cardLayout.show(bodyCardPanel, "form-data")
+                }
+                
+                // Force revalidate to ensure editor renders correctly
+                if (selected == "raw") {
+                    // Ensure editor component is visible and repainted
+                    bodyEditor.component.isVisible = true
+                    bodyEditor.contentComponent.revalidate()
+                    bodyEditor.contentComponent.repaint()
+                    
+                    // Also force parent layout update
+                    bodyCardPanel.revalidate()
+                    bodyCardPanel.repaint()
+                }
+                
+                validateForm()
             }
-            validateForm()
-        }
         topPanel.add(bodyTypeComboBox)
         
         container.add(topPanel, BorderLayout.NORTH)
@@ -1200,6 +1214,13 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         toolbar.setModified(false)
         originalRequest = null
         
+        // Clear body content when switching endpoints
+        // Use WriteCommandAction for safe editor modification
+        com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) {
+            bodyEditor.document.setText("")
+        }
+        bodyTypeComboBox.selectedItem = "none"
+        
         validateForm()
     }
     
@@ -1906,12 +1927,14 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
                         val mapper = com.fasterxml.jackson.databind.ObjectMapper()
                         val jsonNode = mapper.readTree(mockData.body!!)
                         mapper.writerWithDefaultPrettyPrinter().writeValueAsString(jsonNode)
-                    } catch (e: Exception) {
+                    } catch (t: Throwable) {
                         mockData.body!!
                     }
                     
-                    ApplicationManager.getApplication().runWriteAction {
-                        bodyEditor.document.setText(formattedBody)
+                    com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) {
+                        // Ensure standardized line separators (LF) for IntelliJ Document
+                        val normalizedBody = com.intellij.openapi.util.text.StringUtil.convertLineSeparators(formattedBody)
+                        bodyEditor.document.setText(normalizedBody)
                     }
                 } else {
                     bodyTypeComboBox.selectedItem = "none"

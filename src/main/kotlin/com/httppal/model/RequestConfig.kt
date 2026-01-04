@@ -6,8 +6,8 @@ import java.time.Duration
  * Configuration for an HTTP request
  */
 data class RequestConfig(
-    val method: HttpMethod,
-    val url: String,
+    val method: HttpMethod = HttpMethod.GET,
+    val url: String = "",
     val headers: Map<String, String> = emptyMap(),
     val body: String? = null,
     val timeout: Duration = Duration.ofSeconds(30),

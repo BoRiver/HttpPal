@@ -839,8 +839,14 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
     }
     
     private fun extractValueFromAnnotation(annotation: PsiAnnotation): String? {
-        val valueAttribute = annotation.findAttributeValue("value") ?: annotation.findAttributeValue(null)
-        return valueAttribute?.text?.removeSurrounding("\"")
+        val valueAttribute = annotation.findAttributeValue("value") ?: annotation.findAttributeValue(null) ?: annotation.findAttributeValue("path")
+        val text = valueAttribute?.text?.replace("\"", "")?.trim()
+        
+        if (text == "{}" || text == "[]") {
+            return "" // Empty array should be treated as empty path
+        }
+        
+        return text?.removeSurrounding("{", "}")?.trim()
     }
     
     private fun extractValueFromKotlinAnnotation(annotation: org.jetbrains.kotlin.psi.KtAnnotationEntry): String? {
@@ -911,6 +917,7 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                     type = ParameterType.PATH,
                     required = paramRequired ?: true,
                     dataType = parameter.type.presentableText,
+                    qualifiedType = parameter.type.canonicalText,
                     description = paramDescription,
                     example = paramExample
                 ))
@@ -932,6 +939,7 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                     type = ParameterType.QUERY,
                     required = required,
                     dataType = parameter.type.presentableText,
+                    qualifiedType = parameter.type.canonicalText,
                     description = paramDescription,
                     example = paramExample
                 ))
@@ -953,6 +961,7 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                     type = ParameterType.HEADER,
                     required = required,
                     dataType = parameter.type.presentableText,
+                    qualifiedType = parameter.type.canonicalText,
                     description = paramDescription,
                     example = paramExample
                 ))
@@ -969,14 +978,34 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                     type = ParameterType.BODY,
                     required = paramRequired ?: true,
                     dataType = parameter.type.presentableText,
+                    qualifiedType = parameter.type.canonicalText,
                     description = paramDescription,
                     example = paramExample
                 ))
                 return@forEach
             }
+            // Default to body if no annotation and complex type
+            if (!isSimpleType(parameter.type)) {
+                parameters.add(EndpointParameter(
+                    name = parameter.name,
+                    type = ParameterType.BODY,
+                    required = true,
+                    dataType = parameter.type.presentableText,
+                    qualifiedType = parameter.type.canonicalText,
+                    description = paramDescription,
+                    example = paramExample
+                ))
+            }
         }
         
         return parameters
+    }
+    
+    // Helper method to check if type is simple
+    private fun isSimpleType(type: PsiType): Boolean {
+        val name = type.presentableText.lowercase()
+        return name in setOf("string", "int", "integer", "long", "boolean", "double", "float", "short", "byte", "char", "date", "localdate", "localdatetime", "bigdecimal") ||
+               type is PsiPrimitiveType
     }
     
     private fun extractParametersFromKotlinMethod(function: KtFunction): List<EndpointParameter> {

@@ -10,7 +10,8 @@ data class EndpointParameter(
     val defaultValue: String? = null,
     val description: String? = null,
     val dataType: String? = null,
-    val example: String? = null
+    val example: String? = null,
+    val qualifiedType: String? = null
 ) {
     /**
      * Validate the parameter
