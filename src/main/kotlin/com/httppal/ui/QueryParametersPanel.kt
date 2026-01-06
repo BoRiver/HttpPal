@@ -3,8 +3,6 @@ package com.httppal.ui
 import com.httppal.util.HttpPalBundle
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
-import com.intellij.ui.components.JBCheckBox
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
@@ -13,8 +11,6 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import javax.swing.*
 import javax.swing.table.AbstractTableModel
-import javax.swing.table.DefaultTableCellRenderer
-import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
 
 /**
@@ -108,12 +104,11 @@ class QueryParametersPanel(private val project: Project) : JPanel(BorderLayout()
      * Set parameters from a map
      */
     fun setParameters(params: Map<String, String>) {
-        tableModel.clear()
         params.forEach { (key, value) ->
-            tableModel.addRow(QueryParameter(true, key, value, ""))
+            tableModel.setParameterValue(key, value)
         }
-        tableModel.addEmptyRow()
-        fireParametersChanged()
+        onParametersChanged?.invoke(getParameters())
+        onParametersChanged?.invoke(getParameters())
     }
     
     /**
@@ -328,6 +323,14 @@ class QueryParametersPanel(private val project: Project) : JPanel(BorderLayout()
             data.clear()
             if (size > 0) {
                 fireTableRowsDeleted(0, size - 1)
+            }
+        }
+
+        fun setParameterValue(key: String, value: String) {
+            data.find { it.key == key }?.let { param ->
+                param.value = value
+                val index = data.indexOf(param)
+                fireTableCellUpdated(index, 1)
             }
         }
         
