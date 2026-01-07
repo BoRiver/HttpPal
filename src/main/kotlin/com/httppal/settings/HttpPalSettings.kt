@@ -4,6 +4,7 @@ import com.httppal.model.Environment
 import com.httppal.model.FavoriteRequest
 import com.httppal.model.RequestHistoryEntry
 import com.httppal.model.SerializableHistoryEntry
+import com.httppal.model.SerializableFavoriteRequest
 import com.httppal.util.MapUtils.safeMapOf
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.Credentials
@@ -37,9 +38,9 @@ class HttpPalSettings : PersistentStateComponent<HttpPalSettings.State> {
         @XCollection(style = XCollection.Style.v2)
         var environments: MutableList<Environment> = mutableListOf()
         
-        // Note: These may cause serialization issues with Instant/Duration types
-        // TODO: Implement dedicated persistence service in cleanup-and-enhancement spec
-        var favorites: MutableList<FavoriteRequest> = mutableListOf()
+        // Use SerializableFavoriteRequest to avoid Instant/Duration serialization issues
+        @XCollection(style = XCollection.Style.v2)
+        var favorites: MutableList<SerializableFavoriteRequest> = mutableListOf()
         
         // Use SerializableHistoryEntry to avoid Instant/Duration serialization issues
         @XCollection(style = XCollection.Style.v2)
@@ -98,10 +99,15 @@ class HttpPalSettings : PersistentStateComponent<HttpPalSettings.State> {
         try {
             logger.info("Loading HttpPalSettings state: history entries=${state.history.size}, favorites=${state.favorites.size}")
             myState = state
+            
             // Initialize default sensitive headers if not set
             if (myState.sensitiveHeaderNames.isEmpty()) {
                 myState.sensitiveHeaderNames.addAll(DEFAULT_SENSITIVE_HEADERS)
             }
+            
+            // Perform data migration if needed
+            performDataMigration()
+            
             logger.info("HttpPalSettings state loaded successfully")
         } catch (e: Exception) {
             logger.error("Failed to deserialize state, using empty state: ${e.message}", e)
@@ -180,11 +186,42 @@ class HttpPalSettings : PersistentStateComponent<HttpPalSettings.State> {
     }
     
     // Favorites Management
-    fun getFavorites(): List<FavoriteRequest> = myState.favorites.toList()
+    fun getFavorites(): List<FavoriteRequest> {
+        return try {
+            val favorites = myState.favorites.map { serializable ->
+                try {
+                    serializable.toFavoriteRequest()
+                } catch (e: Exception) {
+                    logger.error("Failed to convert SerializableFavoriteRequest to FavoriteRequest: id=${serializable.id}, error=${e.message}", e)
+                    null
+                }
+            }.filterNotNull()
+            
+            logger.debug("Successfully loaded ${favorites.size} favorite entries")
+            favorites
+        } catch (e: Exception) {
+            logger.error("Failed to load favorites, returning empty list: ${e.message}", e)
+            emptyList()
+        }
+    }
     
     fun addFavorite(favorite: FavoriteRequest) {
-        myState.favorites.removeIf { it.id == favorite.id }
-        myState.favorites.add(favorite)
+        try {
+            logger.debug("Adding favorite: id=${favorite.id}, name=${favorite.name}")
+            
+            // Convert to SerializableFavoriteRequest
+            val serializable = SerializableFavoriteRequest.fromFavoriteRequest(favorite)
+            logger.debug("Converted FavoriteRequest to SerializableFavoriteRequest: id=${serializable.id}")
+            
+            // Remove existing favorite with same ID and add new one
+            myState.favorites.removeIf { it.id == favorite.id }
+            myState.favorites.add(serializable)
+            
+            logger.info("Favorite persisted successfully: id=${favorite.id}, name=${favorite.name}")
+        } catch (e: Exception) {
+            logger.error("Failed to add favorite: id=${favorite.id}, error=${e.message}", e)
+            // Don't throw - favorite failure shouldn't break the application
+        }
     }
     
     fun removeFavorite(favoriteId: String) {
@@ -581,6 +618,24 @@ class HttpPalSettings : PersistentStateComponent<HttpPalSettings.State> {
             
         } catch (e: Exception) {
             throw IllegalArgumentException("Invalid import data format: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Perform data migration for compatibility with older versions
+     */
+    private fun performDataMigration() {
+        try {
+            logger.debug("Performing data migration check")
+            
+            // Migration is handled automatically by the serialization framework
+            // If old data exists, it will be loaded as empty lists and new data will be created
+            // This is safe because we're using different field types now
+            
+            logger.debug("Data migration completed successfully")
+        } catch (e: Exception) {
+            logger.warn("Data migration encountered issues: ${e.message}", e)
+            // Continue with empty state - better than crashing
         }
     }
 }

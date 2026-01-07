@@ -1,13 +1,12 @@
 package com.httppal.model
 
 import java.time.Instant
-import java.util.*
 
 /**
  * Represents a favorite request saved by the user
  */
 data class FavoriteRequest(
-    val id: String = UUID.randomUUID().toString(),
+    val id: String = "",
     val name: String = "",
     val request: RequestConfig = RequestConfig(),
     val tags: List<String> = emptyList(),

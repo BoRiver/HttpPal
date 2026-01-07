@@ -1,12 +1,11 @@
 package com.httppal.model
 
-import java.util.*
 
 /**
  * Represents an environment configuration (dev, staging, production, etc.)
  */
 data class Environment(
-    val id: String = UUID.randomUUID().toString(),
+    val id: String = "",
     val name: String = "",
     val baseUrl: String = "",
     val globalHeaders: Map<String, String> = emptyMap(),

@@ -1,12 +1,11 @@
 package com.httppal.model
 
-import java.util.*
 
 /**
  * Represents an API endpoint configuration
  */
 data class EndpointInfo(
-    val id: String = UUID.randomUUID().toString(),
+    val id: String = "",
     val method: HttpMethod = HttpMethod.GET,
     val path: String = "",
     val baseUrl: String? = null,

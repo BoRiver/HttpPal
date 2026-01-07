@@ -169,6 +169,7 @@ class FavoritesServiceImpl : FavoritesService {
     
     override fun createFavoriteFromHistory(historyEntry: RequestHistoryEntry, name: String, folder: String?): FavoriteRequest {
         return FavoriteRequest(
+            id = UUID.randomUUID().toString(),
             name = name,
             request = historyEntry.request,
             folder = folder,
@@ -178,6 +179,7 @@ class FavoritesServiceImpl : FavoritesService {
     
     override fun createFavoriteFromRequest(request: RequestConfig, name: String, folder: String?): FavoriteRequest {
         return FavoriteRequest(
+            id = UUID.randomUUID().toString(),
             name = name,
             request = request,
             folder = folder,

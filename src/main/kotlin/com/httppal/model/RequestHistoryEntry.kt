@@ -75,6 +75,7 @@ data class RequestHistoryEntry(
      */
     fun toFavoriteRequest(name: String): FavoriteRequest {
         return FavoriteRequest(
+            id = UUID.randomUUID().toString(),
             name = name,
             request = request,
             createdAt = timestamp
