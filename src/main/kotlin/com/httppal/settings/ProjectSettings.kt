@@ -123,7 +123,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     // Environment Management
     fun getEnvironments(): List<Environment> {
         return try {
-            val environments = myState.environments.map { serializable ->
+            val environments = myState.environments.filterNotNull().map { serializable ->
                 try {
                     serializable.toEnvironment()
                 } catch (e: Exception) {
@@ -197,7 +197,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     
     fun getEnvironmentById(id: String): Environment? {
         return try {
-            val serializable = myState.environments.find { it.id == id }
+            val serializable = myState.environments.find { it != null && it.id == id }
             serializable?.toEnvironment()
         } catch (e: Exception) {
             logger.error("Failed to get environment by id: $id, error=${e.message}", e)
@@ -207,7 +207,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     
     fun getEnvironmentByName(name: String): Environment? {
         return try {
-            val serializable = myState.environments.find { it.name == name }
+            val serializable = myState.environments.find { it != null && it.name == name }
             serializable?.toEnvironment()
         } catch (e: Exception) {
             logger.error("Failed to get environment by name: $name, error=${e.message}", e)
