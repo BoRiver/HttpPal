@@ -21,12 +21,10 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
-import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
 import kotlinx.coroutines.launch
 import java.awt.*
 import java.awt.event.ActionEvent
@@ -59,7 +57,8 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
     private var onRefreshCallback: (() -> Unit)? = null
     
     // State
-    private var currentEndpoints: List<DiscoveredEndpoint> = emptyList()
+    private var allEndpoints: List<DiscoveredEndpoint> = emptyList() // 保存所有端点
+    private var currentEndpoints: List<DiscoveredEndpoint> = emptyList() // 当前显示的端点（可能是筛选后的）
     private var isLoading = false
     
     // New UI components for view mode and filtering
@@ -466,18 +465,24 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
     /**
      * Apply filter to endpoints
      * Handles empty filter results
+     * Always filters from allEndpoints to avoid cumulative filtering
      */
     private fun applyFilter(filterText: String) {
         // Update renderer with current filter text for highlighting
         treeRenderer.setFilterText(filterText)
         
         if (filterText.isBlank()) {
-            // Show all endpoints
-            updateEndpointsDisplay(currentEndpoints)
+            // Show all endpoints - use allEndpoints instead of currentEndpoints
+            currentEndpoints = allEndpoints
+            viewModel.updateEndpoints(allEndpoints)
+            updateTreeForViewMode(controller.getCurrentViewMode())
+            updateStatusPanel("Found ${allEndpoints.size} endpoints")
+            tree.repaint()
             return
         }
         
-        // Get filtered endpoints from view model
+        // Get filtered endpoints from view model - always filter from allEndpoints
+        viewModel.updateEndpoints(allEndpoints)
         val filteredEndpoints = viewModel.applyFilter(filterText, controller.getCurrentViewMode())
         
         // Handle empty filter results
@@ -490,9 +495,13 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
             tree.expandPath(TreePath(rootNode.path))
             updateStatusPanel("No matches found for '$filterText'")
         } else {
-            // Update display with filtered endpoints
-            updateEndpointsDisplay(filteredEndpoints)
-            updateStatusPanel("Filtered: ${filteredEndpoints.size} of ${currentEndpoints.size} endpoints")
+            // Update currentEndpoints for display
+            currentEndpoints = filteredEndpoints
+            // Update view model with filtered endpoints
+            viewModel.updateEndpoints(filteredEndpoints)
+            // Update tree display
+            updateTreeForViewMode(controller.getCurrentViewMode())
+            updateStatusPanel("Filtered: ${filteredEndpoints.size} of ${allEndpoints.size} endpoints")
         }
         
         // Repaint tree to apply highlighting
@@ -562,11 +571,11 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
             ViewMode.AUTO_DISCOVERY -> true // Always supported
             ViewMode.SWAGGER -> {
                 // Check if we have any endpoints with Swagger metadata
-                currentEndpoints.any { it.tags.isNotEmpty() || it.operationId != null || it.summary != null }
+                allEndpoints.any { it.tags.isNotEmpty() || it.operationId != null || it.summary != null }
             }
             ViewMode.CLASS_METHOD -> {
                 // Check if we have class and method names
-                currentEndpoints.all { it.className.isNotBlank() && it.methodName.isNotBlank() }
+                allEndpoints.all { it.className.isNotBlank() && it.methodName.isNotBlank() }
             }
         }
     }
@@ -982,36 +991,61 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
      * Preserves selection after update
      */
     private fun performEndpointsUpdate(endpoints: List<DiscoveredEndpoint>) {
-        currentEndpoints = endpoints
+        // Update allEndpoints with the new full list
+        allEndpoints = endpoints
+        
+        // If there's an active filter, re-apply it to the new endpoints
+        val filterText = filterTextField.text
+        if (filterText.isNotBlank()) {
+            // Re-apply filter on new endpoints
+            viewModel.updateEndpoints(allEndpoints)
+            val filteredEndpoints = viewModel.applyFilter(filterText, controller.getCurrentViewMode())
+            currentEndpoints = filteredEndpoints
+        } else {
+            // No filter active, show all endpoints
+            currentEndpoints = allEndpoints
+        }
         
         // Handle empty endpoint list
-        if (endpoints.isEmpty()) {
+        if (currentEndpoints.isEmpty()) {
             rootNode.removeAllChildren()
-            val noEndpointsNode = DefaultMutableTreeNode("No endpoints found")
+            val noEndpointsNode = if (filterText.isNotBlank()) {
+                DefaultMutableTreeNode("No endpoints match '$filterText'")
+            } else {
+                DefaultMutableTreeNode("No endpoints found")
+            }
             rootNode.add(noEndpointsNode)
             treeModel.reload()
             tree.expandPath(TreePath(rootNode.path))
-            updateStatusPanel("No endpoints discovered")
+            updateStatusPanel(if (filterText.isNotBlank()) {
+                "No matches found for '$filterText'"
+            } else {
+                "No endpoints discovered"
+            })
             return
         }
         
-        // Update view model with new endpoints
-        viewModel.updateEndpoints(endpoints)
+        // Update view model with current endpoints (filtered or all)
+        viewModel.updateEndpoints(currentEndpoints)
         
         // Update tree display based on current view mode
         updateTreeForViewMode(controller.getCurrentViewMode())
         
         // Try to restore selection after tree update
-        val restored = controller.restoreSelection(endpoints)
+        val restored = controller.restoreSelection(currentEndpoints)
         if (restored) {
             // Find and select the matching endpoint in the tree
-            val matchingEndpoint = controller.findMatchingEndpoint(endpoints)
+            val matchingEndpoint = controller.findMatchingEndpoint(currentEndpoints)
             if (matchingEndpoint != null) {
                 selectEndpointInTree(matchingEndpoint)
             }
         }
         
-        updateStatusPanel("Found ${endpoints.size} endpoints")
+        updateStatusPanel(if (filterText.isNotBlank()) {
+            "Filtered: ${currentEndpoints.size} of ${allEndpoints.size} endpoints"
+        } else {
+            "Found ${allEndpoints.size} endpoints"
+        })
     }
     
     /**
@@ -1163,10 +1197,10 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
     }
     
     /**
-     * Get all discovered endpoints
+     * Get all discovered endpoints (unfiltered)
      */
     fun getAllEndpoints(): List<DiscoveredEndpoint> {
-        return currentEndpoints.toList()
+        return allEndpoints.toList()
     }
     
     /**
