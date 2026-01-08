@@ -793,8 +793,8 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
         if (!autoLoadManager.hasLoadedEndpoints()) {
             autoLoadManager.startAutoLoad()
         } else {
-            // If already loaded, just refresh the display with current endpoints
-            val endpoints = endpointDiscoveryService.discoverEndpoints()
+            // If already loaded, just refresh the display with cached endpoints
+            val endpoints = endpointDiscoveryService.getCachedEndpoints()
             updateEndpointsDisplay(endpoints)
         }
     }
@@ -921,8 +921,8 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
             )
         )
         
-        // Get all current endpoints from discovery service
-        val allEndpoints = endpointDiscoveryService.discoverEndpoints()
+        // Get all current endpoints from discovery service (use cache)
+        val allEndpoints = endpointDiscoveryService.getCachedEndpoints()
         // Selection restoration is handled in performEndpointsUpdate
         updateEndpointsDisplay(allEndpoints)
         
@@ -1177,8 +1177,8 @@ class EndpointTreePanel(private val project: Project) : JPanel(BorderLayout()) {
      */
     fun onEnvironmentChanged(environment: Environment?) {
         // Refresh endpoints when environment changes
-        // This may affect endpoint resolution and display
-        val endpoints = endpointDiscoveryService.discoverEndpoints()
+        // This may affect endpoint resolution and display (use cache)
+        val endpoints = endpointDiscoveryService.getCachedEndpoints()
         // Selection restoration is handled in performEndpointsUpdate
         updateEndpointsDisplay(endpoints)
         

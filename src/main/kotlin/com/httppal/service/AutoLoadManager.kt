@@ -95,8 +95,7 @@ class AutoLoadManager(private val project: Project) {
             return
         }
         
-        // Check if endpoints have already been loaded during startup
-        // If so, skip the scan but still notify UI components
+        // Get the endpoint discovery service
         val discoveryService = try {
             project.service<EndpointDiscoveryService>()
         } catch (e: Throwable) {
@@ -115,14 +114,10 @@ class AutoLoadManager(private val project: Project) {
             return
         }
         
-        val cachedEndpoints = try {
-            discoveryService.getEndpointsByClass().values.flatten()
-        } catch (e: Exception) {
-            emptyList()
-        }
-        
-        if (cachedEndpoints.isNotEmpty() && !hasLoadedOnce.get()) {
-            logger.info("Endpoints already discovered during startup (${cachedEndpoints.size} endpoints), using cached data")
+        // Check if endpoints have already been discovered
+        if (discoveryService.hasDiscoveredEndpoints() && !hasLoadedOnce.get()) {
+            val cachedEndpoints = discoveryService.getCachedEndpoints()
+            logger.info("Endpoints already discovered (${cachedEndpoints.size} endpoints), using cached data")
             
             // Mark as loaded
             hasLoadedOnce.set(true)
@@ -132,7 +127,7 @@ class AutoLoadManager(private val project: Project) {
             
             LoggingUtils.logWithContext(
                 LoggingUtils.LogLevel.DEBUG,
-                "Using cached endpoints from startup",
+                "Using cached endpoints from previous discovery",
                 mapOf(
                     "endpointCount" to cachedEndpoints.size,
                     "classCount" to cachedEndpoints.groupBy { it.className }.size
@@ -166,14 +161,6 @@ class AutoLoadManager(private val project: Project) {
                 // Notify listeners that loading has started
                 // Implements requirement 1.3: Display loading indicator
                 notifyLoadingStarted(HttpPalBundle.message("endpoints.loading"))
-                
-                // Get the endpoint discovery service
-                val discoveryService = try {
-                    project.service<EndpointDiscoveryService>()
-                } catch (e: Throwable) {
-                    logger.warn("Failed to get EndpointDiscoveryService", e)
-                    throw e
-                }
                 
                 // Discover endpoints in background
                 val endpoints = withContext(Dispatchers.IO) {

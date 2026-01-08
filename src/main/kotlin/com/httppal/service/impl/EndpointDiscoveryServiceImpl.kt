@@ -49,6 +49,15 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
     // Performance optimization: Track files that have been scanned to avoid duplicate work
     private val scannedFiles = ConcurrentHashMap.newKeySet<String>()
     
+    // Discovery coordination: Prevent redundant scans during startup
+    @Volatile
+    private var isDiscovering = false
+    
+    @Volatile
+    private var hasDiscovered = false
+    
+    private val discoveryLock = Any()
+    
     // Spring MVC annotations
     private val springMvcAnnotations = mapOf(
         "RequestMapping" to null, // Can be any method
@@ -81,177 +90,230 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
             return emptyList()
         }
         
-        LoggingUtils.logInfo("=== Starting endpoint discovery ===")
+        // Check if already discovered and cache is valid
+        if (hasDiscovered && cachedEndpoints.isNotEmpty()) {
+            LoggingUtils.logWithContext(
+                LoggingUtils.LogLevel.DEBUG,
+                "Using cached endpoints from previous discovery",
+                mapOf<String, Any>("cachedFileCount" to cachedEndpoints.size)
+            )
+            return cachedEndpoints.values.flatten()
+        }
         
-        return LoggingUtils.measureAndLog("Discover API endpoints") {
-            PerformanceMonitor.measureEndpointDiscovery(
-                details = mapOf("operation" to "full_scan")
-            ) {
-                ReadAction.compute<List<DiscoveredEndpoint>, RuntimeException> {
-                    ErrorHandler.withErrorHandling(
-                        "Discover endpoints", 
-                        project
-                    ) {
-                        val allEndpoints = mutableListOf<DiscoveredEndpoint>()
-                        
-                        // Performance optimization: Use cached endpoints if available and files haven't changed
-                        val cachedCount = cachedEndpoints.size
-                        if (cachedCount > 0) {
+        // Use synchronization to ensure only one thread performs discovery
+        synchronized(discoveryLock) {
+            // Double-check after acquiring lock
+            if (hasDiscovered && cachedEndpoints.isNotEmpty()) {
+                return cachedEndpoints.values.flatten()
+            }
+            
+            // Check if another thread is already discovering
+            if (isDiscovering) {
+                LoggingUtils.logWithContext(
+                    LoggingUtils.LogLevel.DEBUG,
+                    "Discovery already in progress, waiting for completion",
+                    emptyMap()
+                )
+                // Wait for the other thread to complete
+                while (isDiscovering) {
+                    try {
+                        (discoveryLock as Object).wait(100)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return emptyList()
+                    }
+                }
+                // Return the results from the completed discovery
+                return cachedEndpoints.values.flatten()
+            }
+            
+            // Mark as discovering
+            isDiscovering = true
+        }
+        
+        try {
+            LoggingUtils.logInfo("=== Starting endpoint discovery ===")
+
+            return LoggingUtils.measureAndLog("Discover API endpoints") {
+                PerformanceMonitor.measureEndpointDiscovery(
+                    details = mapOf("operation" to "full_scan")
+                ) {
+                    ReadAction.compute<List<DiscoveredEndpoint>, RuntimeException> {
+                        ErrorHandler.withErrorHandling(
+                            "Discover endpoints",
+                            project
+                        ) {
+                            val allEndpoints = mutableListOf<DiscoveredEndpoint>()
+
+                            // Search Java files with optimized PSI queries
+                            val javaFiles = FileTypeIndex.getFiles(
+                                com.intellij.ide.highlighter.JavaFileType.INSTANCE,
+                                GlobalSearchScope.projectScope(project)
+                            )
+
                             LoggingUtils.logWithContext(
                                 LoggingUtils.LogLevel.DEBUG,
-                                "Using cached endpoints",
-                                mapOf<String, Any>("cachedFileCount" to cachedCount)
+                                "Scanning Java files for endpoints",
+                                mapOf<String, Any>("fileCount" to javaFiles.size)
                             )
-                        }
-                        
-                        // Search Java files with optimized PSI queries
-                        val javaFiles = FileTypeIndex.getFiles(
-                            com.intellij.ide.highlighter.JavaFileType.INSTANCE,
-                            GlobalSearchScope.projectScope(project)
-                        )
-                        
-                        LoggingUtils.logWithContext(
-                            LoggingUtils.LogLevel.DEBUG,
-                            "Scanning Java files for endpoints",
-                            mapOf<String, Any>("fileCount" to javaFiles.size)
-                        )
-                        
-                        javaFiles.forEach { virtualFile ->
-                            try {
-                                // Performance optimization: Check if file has been modified since last scan
-                                val filePath = virtualFile.path
-                                val currentTimestamp = virtualFile.timeStamp
-                                val cachedTimestamp = fileTimestamps[filePath]
-                                
-                                if (cachedTimestamp != null && cachedTimestamp == currentTimestamp && cachedEndpoints.containsKey(filePath)) {
-                                    // Use cached endpoints for this file
-                                    val cachedFileEndpoints = cachedEndpoints[filePath] ?: emptyList()
-                                    allEndpoints.addAll(cachedFileEndpoints)
-                                    scannedFiles.add(filePath)
-                                } else {
-                                    // Scan the file
-                                    val psiFile = getPsiFile(virtualFile)
-                                    if (psiFile is PsiJavaFile) {
-                                        val endpoints = discoverEndpointsInJavaFile(psiFile)
-                                        allEndpoints.addAll(endpoints)
-                                        cachedEndpoints[filePath] = endpoints
-                                        fileTimestamps[filePath] = currentTimestamp
+
+                            javaFiles.forEach { virtualFile ->
+                                try {
+                                    // Performance optimization: Check if file has been modified since last scan
+                                    val filePath = virtualFile.path
+                                    val currentTimestamp = virtualFile.timeStamp
+                                    val cachedTimestamp = fileTimestamps[filePath]
+
+                                    if (cachedTimestamp != null && cachedTimestamp == currentTimestamp && cachedEndpoints.containsKey(
+                                            filePath
+                                        )
+                                    ) {
+                                        // Use cached endpoints for this file
+                                        val cachedFileEndpoints = cachedEndpoints[filePath] ?: emptyList()
+                                        allEndpoints.addAll(cachedFileEndpoints)
                                         scannedFiles.add(filePath)
-                                        
-                                        if (endpoints.isNotEmpty()) {
-                                            LoggingUtils.logWithContext(
-                                                LoggingUtils.LogLevel.DEBUG,
-                                                "Found endpoints in Java file",
-                                                mapOf<String, Any>(
-                                                    "file" to virtualFile.name,
-                                                    "endpointCount" to endpoints.size
+                                    } else {
+                                        // Scan the file
+                                        val psiFile = getPsiFile(virtualFile)
+                                        if (psiFile is PsiJavaFile) {
+                                            val endpoints = discoverEndpointsInJavaFile(psiFile)
+                                            allEndpoints.addAll(endpoints)
+                                            cachedEndpoints[filePath] = endpoints
+                                            fileTimestamps[filePath] = currentTimestamp
+                                            scannedFiles.add(filePath)
+
+                                            if (endpoints.isNotEmpty()) {
+                                                LoggingUtils.logWithContext(
+                                                    LoggingUtils.LogLevel.DEBUG,
+                                                    "Found endpoints in Java file",
+                                                    mapOf<String, Any>(
+                                                        "file" to virtualFile.name,
+                                                        "endpointCount" to endpoints.size
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
+                                } catch (e: Exception) {
+                                    LoggingUtils.logWithContext(
+                                        LoggingUtils.LogLevel.WARN,
+                                        "Failed to scan Java file for endpoints",
+                                        mapOf<String, Any>(
+                                            "file" to virtualFile.name,
+                                            "error" to (e.message ?: "Unknown error")
+                                        ),
+                                        e
+                                    )
                                 }
-                            } catch (e: Exception) {
-                                LoggingUtils.logWithContext(
-                                    LoggingUtils.LogLevel.WARN,
-                                    "Failed to scan Java file for endpoints",
-                                    mapOf<String, Any>("file" to virtualFile.name, "error" to (e.message ?: "Unknown error")),
-                                    e
-                                )
                             }
-                        }
-                        
-                        // Search Kotlin files with optimized PSI queries
-                        val kotlinFiles = FileTypeIndex.getFiles(
-                            FileTypeManager.getInstance().getFileTypeByExtension("kt"),
-                            GlobalSearchScope.projectScope(project)
-                        )
-                        
-                        LoggingUtils.logWithContext(
-                            LoggingUtils.LogLevel.DEBUG,
-                            "Scanning Kotlin files for endpoints",
-                            mapOf<String, Any>("fileCount" to kotlinFiles.size)
-                        )
-                        
-                        kotlinFiles.forEach { virtualFile ->
-                            try {
-                                // Performance optimization: Check if file has been modified since last scan
-                                val filePath = virtualFile.path
-                                val currentTimestamp = virtualFile.timeStamp
-                                val cachedTimestamp = fileTimestamps[filePath]
-                                
-                                if (cachedTimestamp != null && cachedTimestamp == currentTimestamp && cachedEndpoints.containsKey(filePath)) {
-                                    // Use cached endpoints for this file
-                                    val cachedFileEndpoints = cachedEndpoints[filePath] ?: emptyList()
-                                    allEndpoints.addAll(cachedFileEndpoints)
-                                    scannedFiles.add(filePath)
-                                } else {
-                                    // Scan the file
-                                    val psiFile = getPsiFile(virtualFile)
-                                    if (psiFile != null) {
-                                        val endpoints = discoverEndpointsInKotlinFile(psiFile)
-                                        allEndpoints.addAll(endpoints)
-                                        cachedEndpoints[filePath] = endpoints
-                                        fileTimestamps[filePath] = currentTimestamp
+
+                            // Search Kotlin files with optimized PSI queries
+                            val kotlinFiles = FileTypeIndex.getFiles(
+                                FileTypeManager.getInstance().getFileTypeByExtension("kt"),
+                                GlobalSearchScope.projectScope(project)
+                            )
+
+                            LoggingUtils.logWithContext(
+                                LoggingUtils.LogLevel.DEBUG,
+                                "Scanning Kotlin files for endpoints",
+                                mapOf<String, Any>("fileCount" to kotlinFiles.size)
+                            )
+
+                            kotlinFiles.forEach { virtualFile ->
+                                try {
+                                    // Performance optimization: Check if file has been modified since last scan
+                                    val filePath = virtualFile.path
+                                    val currentTimestamp = virtualFile.timeStamp
+                                    val cachedTimestamp = fileTimestamps[filePath]
+
+                                    if (cachedTimestamp != null && cachedTimestamp == currentTimestamp && cachedEndpoints.containsKey(
+                                            filePath
+                                        )
+                                    ) {
+                                        // Use cached endpoints for this file
+                                        val cachedFileEndpoints = cachedEndpoints[filePath] ?: emptyList()
+                                        allEndpoints.addAll(cachedFileEndpoints)
                                         scannedFiles.add(filePath)
-                                        
-                                        if (endpoints.isNotEmpty()) {
-                                            LoggingUtils.logWithContext(
-                                                LoggingUtils.LogLevel.DEBUG,
-                                                "Found endpoints in Kotlin file",
-                                                mapOf<String, Any>(
-                                                    "file" to virtualFile.name,
-                                                    "endpointCount" to endpoints.size
+                                    } else {
+                                        // Scan the file
+                                        val psiFile = getPsiFile(virtualFile)
+                                        if (psiFile != null) {
+                                            val endpoints = discoverEndpointsInKotlinFile(psiFile)
+                                            allEndpoints.addAll(endpoints)
+                                            cachedEndpoints[filePath] = endpoints
+                                            fileTimestamps[filePath] = currentTimestamp
+                                            scannedFiles.add(filePath)
+
+                                            if (endpoints.isNotEmpty()) {
+                                                LoggingUtils.logWithContext(
+                                                    LoggingUtils.LogLevel.DEBUG,
+                                                    "Found endpoints in Kotlin file",
+                                                    mapOf<String, Any>(
+                                                        "file" to virtualFile.name,
+                                                        "endpointCount" to endpoints.size
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
+                                } catch (e: Exception) {
+                                    LoggingUtils.logWithContext(
+                                        LoggingUtils.LogLevel.WARN,
+                                        "Failed to scan Kotlin file for endpoints",
+                                        mapOf<String, Any>(
+                                            "file" to virtualFile.name,
+                                            "error" to (e.message ?: "Unknown error")
+                                        ),
+                                        e
+                                    )
+                                }
+                            }
+
+                            LoggingUtils.logWithContext(
+                                LoggingUtils.LogLevel.INFO,
+                                "Endpoint discovery completed",
+                                mapOf<String, Any>(
+                                    "totalEndpoints" to allEndpoints.size,
+                                    "javaFilesScanned" to javaFiles.size,
+                                    "kotlinFilesScanned" to kotlinFiles.size,
+                                    "cachedFiles" to (javaFiles.size + kotlinFiles.size - scannedFiles.size),
+                                    "scannedFiles" to scannedFiles.size
+                                )
+                            )
+
+                            if (allEndpoints.isEmpty()) {
+                                LoggingUtils.logWarning("No endpoints found! Java files: ${javaFiles.size}, Kotlin files: ${kotlinFiles.size}")
+                            }
+
+                            // 集成 OpenAPI 端点
+                            try {
+                                val openAPIService =
+                                    project.getService(com.httppal.service.OpenAPIDiscoveryService::class.java)
+                                if (openAPIService != null) {
+                                    val openAPIEndpoints = openAPIService.parseAllOpenAPIFiles()
+                                    allEndpoints.addAll(openAPIEndpoints)
+
+                                    LoggingUtils.logWithContext(
+                                        LoggingUtils.LogLevel.INFO,
+                                        "Added OpenAPI endpoints",
+                                        mapOf<String, Any>("openAPIEndpoints" to openAPIEndpoints.size)
+                                    )
                                 }
                             } catch (e: Exception) {
-                                LoggingUtils.logWithContext(
-                                    LoggingUtils.LogLevel.WARN,
-                                    "Failed to scan Kotlin file for endpoints",
-                                    mapOf<String, Any>("file" to virtualFile.name, "error" to (e.message ?: "Unknown error")),
-                                    e
-                                )
+                                LoggingUtils.logError("Failed to discover OpenAPI endpoints", e)
                             }
-                        }
-                        
-                        LoggingUtils.logWithContext(
-                            LoggingUtils.LogLevel.INFO,
-                            "Endpoint discovery completed",
-                            mapOf<String, Any>(
-                                "totalEndpoints" to allEndpoints.size,
-                                "javaFilesScanned" to javaFiles.size,
-                                "kotlinFilesScanned" to kotlinFiles.size,
-                                "cachedFiles" to (javaFiles.size + kotlinFiles.size - scannedFiles.size),
-                                "scannedFiles" to scannedFiles.size
-                            )
-                        )
-                        
-                        if (allEndpoints.isEmpty()) {
-                            LoggingUtils.logWarning("No endpoints found! Java files: ${javaFiles.size}, Kotlin files: ${kotlinFiles.size}")
-                        }
-                        
-                        // 集成 OpenAPI 端点
-                        try {
-                            val openAPIService = project.getService(com.httppal.service.OpenAPIDiscoveryService::class.java)
-                            if (openAPIService != null) {
-                                val openAPIEndpoints = openAPIService.parseAllOpenAPIFiles()
-                                allEndpoints.addAll(openAPIEndpoints)
-                                
-                                LoggingUtils.logWithContext(
-                                    LoggingUtils.LogLevel.INFO,
-                                    "Added OpenAPI endpoints",
-                                    mapOf<String, Any>("openAPIEndpoints" to openAPIEndpoints.size)
-                                )
-                            }
-                        } catch (e: Exception) {
-                            LoggingUtils.logError("Failed to discover OpenAPI endpoints", e)
-                        }
-                        
-                        return@withErrorHandling allEndpoints
-                    } ?: emptyList()
+
+                            return@withErrorHandling allEndpoints
+                        } ?: emptyList()
+                    }
                 }
+            }
+        }finally {
+            // Mark discovery as complete and notify waiting threads
+            synchronized(discoveryLock) {
+                isDiscovering = false
+                hasDiscovered = true
+                (discoveryLock as Object).notifyAll()
             }
         }
     }
@@ -282,6 +344,12 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
         // Perform refresh in background thread to avoid blocking EDT
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
+                // Reset discovery state to allow fresh scan
+                synchronized(discoveryLock) {
+                    hasDiscovered = false
+                    isDiscovering = false
+                }
+                
                 // Clear caches to force full rescan
                 cachedEndpoints.clear()
                 fileTimestamps.clear()
@@ -454,6 +522,14 @@ class EndpointDiscoveryServiceImpl(private val project: Project) : EndpointDisco
                 } ?: emptyList()
             }
         }
+    }
+    
+    override fun hasDiscoveredEndpoints(): Boolean {
+        return hasDiscovered
+    }
+    
+    override fun getCachedEndpoints(): List<DiscoveredEndpoint> {
+        return cachedEndpoints.values.flatten()
     }
     
     private fun discoverEndpointsInJavaFile(javaFile: PsiJavaFile): List<DiscoveredEndpoint> {

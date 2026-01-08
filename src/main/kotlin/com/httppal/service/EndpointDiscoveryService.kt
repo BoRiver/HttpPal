@@ -79,4 +79,20 @@ interface EndpointDiscoveryService {
      * @return List of endpoints discovered in the file
      */
     fun scanFile(file: PsiFile): List<DiscoveredEndpoint>
+    
+    /**
+     * Check if endpoints have been discovered at least once
+     * This method does not trigger a discovery operation
+     * 
+     * @return true if initial discovery has completed, false otherwise
+     */
+    fun hasDiscoveredEndpoints(): Boolean
+    
+    /**
+     * Get cached endpoints without triggering a new discovery
+     * Returns empty list if no discovery has been performed yet
+     * 
+     * @return List of cached endpoints
+     */
+    fun getCachedEndpoints(): List<DiscoveredEndpoint>
 }
