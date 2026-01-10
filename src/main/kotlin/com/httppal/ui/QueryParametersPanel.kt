@@ -108,7 +108,6 @@ class QueryParametersPanel(private val project: Project) : JPanel(BorderLayout()
             tableModel.setParameterValue(key, value)
         }
         onParametersChanged?.invoke(getParameters())
-        onParametersChanged?.invoke(getParameters())
     }
     
     /**

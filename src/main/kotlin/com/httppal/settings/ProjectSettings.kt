@@ -39,6 +39,13 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     
     override fun loadState(state: State) {
         logger.info("ProjectSettings.loadState() called: environments=${state.environments.size}, currentEnvId=${state.currentEnvironmentId}")
+
+        // Clean up any null values that may have been persisted
+        state.manualEndpoints.removeIf { it == null }
+        state.environments.removeIf { it == null }
+        state.excludedPackages.removeIf { it == null }
+        state.includedPackages.removeIf { it == null }
+
         myState = state
         logger.info("ProjectSettings state loaded successfully")
     }
@@ -47,16 +54,19 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     fun getManualEndpoints(): List<EndpointInfo> = myState.manualEndpoints.toList()
     
     fun addManualEndpoint(endpoint: EndpointInfo) {
-        myState.manualEndpoints.removeIf { it.id == endpoint.id }
+        // Handle potential null values in the list
+        myState.manualEndpoints.removeIf { it != null && it.id == endpoint.id }
         myState.manualEndpoints.add(endpoint)
     }
-    
+
     fun removeManualEndpoint(endpointId: String) {
-        myState.manualEndpoints.removeIf { it.id == endpointId }
+        // Handle potential null values in the list
+        myState.manualEndpoints.removeIf { it != null && it.id == endpointId }
     }
-    
+
     fun updateManualEndpoint(endpoint: EndpointInfo) {
-        val index = myState.manualEndpoints.indexOfFirst { it.id == endpoint.id }
+        // Handle potential null values in the list
+        val index = myState.manualEndpoints.indexOfFirst { it != null && it.id == endpoint.id }
         if (index >= 0) {
             myState.manualEndpoints[index] = endpoint
         }
@@ -143,15 +153,16 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     fun addEnvironment(environment: Environment) {
         try {
             logger.info("addEnvironment() called: id=${environment.id}, name=${environment.name}")
-            
+
             // Convert to SerializableEnvironment
             val serializable = SerializableEnvironment.fromEnvironment(environment)
             logger.debug("Converted Environment to SerializableEnvironment: id=${serializable.id}")
-            
+
             // Remove existing environment with same ID and add new one
-            myState.environments.removeIf { it.id == environment.id }
+            // Handle potential null values in the list
+            myState.environments.removeIf { it != null && it.id == environment.id }
             myState.environments.add(serializable)
-            
+
             logger.info("Environment persisted successfully: id=${environment.id}, name=${environment.name}, total environments: ${myState.environments.size}")
         } catch (e: Exception) {
             logger.error("Failed to add environment: id=${environment.id}, error=${e.message}", e)
@@ -161,7 +172,8 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     
     fun removeEnvironment(environmentId: String) {
         logger.info("removeEnvironment() called: id=$environmentId")
-        val removed = myState.environments.removeIf { it.id == environmentId }
+        // Handle potential null values in the list
+        val removed = myState.environments.removeIf { it != null && it.id == environmentId }
         if (myState.currentEnvironmentId == environmentId) {
             myState.currentEnvironmentId = null
         }
@@ -171,12 +183,13 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     fun updateEnvironment(environment: Environment) {
         try {
             logger.info("updateEnvironment() called: id=${environment.id}, name=${environment.name}")
-            
+
             // Convert to SerializableEnvironment
             val serializable = SerializableEnvironment.fromEnvironment(environment)
             logger.debug("Converted Environment to SerializableEnvironment: id=${serializable.id}")
-            
-            val index = myState.environments.indexOfFirst { it.id == environment.id }
+
+            // Handle potential null values in the list
+            val index = myState.environments.indexOfFirst { it != null && it.id == environment.id }
             if (index >= 0) {
                 myState.environments[index] = serializable
                 logger.info("Environment updated successfully at index $index")

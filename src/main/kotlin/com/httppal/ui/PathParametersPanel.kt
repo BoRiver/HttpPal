@@ -123,7 +123,6 @@ class PathParametersPanel(private val project: Project) : JPanel(BorderLayout())
             tableModel.setParameterValue(name, value)
         }
         onParametersChanged?.invoke(getParameters())
-        onParametersChanged?.invoke(getParameters())
     }
 
     /**

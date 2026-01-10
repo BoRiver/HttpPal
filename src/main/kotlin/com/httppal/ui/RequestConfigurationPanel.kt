@@ -164,18 +164,9 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         urlLabel.font = urlLabel.font.deriveFont(Font.BOLD, 13f)
         mainPanel.add(urlLabel, gbc)
         gbc.gridx = 1; gbc.fill = GridBagConstraints.HORIZONTAL; gbc.weightx = 1.0
-        
-        // Setup EnhancedUrlField callbacks
-        enhancedUrlField.onUrlChanged = { url ->
-            // Update path parameters when URL changes
-            pathParametersPanel.updateFromUrl(url)
-            // Update validation when URL changes
-            validateForm()
-        }
-        enhancedUrlField.onValidationChanged = { isValid, message ->
-            // Handle validation state changes if needed
-        }
-        
+
+        // EnhancedUrlField callbacks will be set in setupValidation()
+
         mainPanel.add(enhancedUrlField, gbc)
         
         // Path Parameters section (auto-shows when URL contains {param})
@@ -205,13 +196,11 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         gbc.weightx = 1.0; gbc.weighty = 1.0 // Give it full weight to expand correctly
         
         // Setup query parameters callback
+        // Note: We don't auto-update the URL here to avoid duplicate parameters
+        // Parameters are stored in RequestConfig.queryParameters and applied in getFinalUrl()
         queryParametersPanel.onParametersChanged = { params ->
-            // Update URL when query parameters change
-            val baseUrl = enhancedUrlField.getText().split("?")[0]
-            val newUrl = queryParametersPanel.appendToUrl(baseUrl)
-            if (newUrl != enhancedUrlField.getText()) {
-                enhancedUrlField.setText(newUrl)
-            }
+            // Just validate the form when parameters change
+            validateForm()
         }
         
         // Create headers panel
@@ -511,7 +500,10 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
         }
         
         // EnhancedUrlField already has its own validation callback
-        enhancedUrlField.onUrlChanged = { _ ->
+        enhancedUrlField.onUrlChanged = { url ->
+            // Update path parameters when URL changes
+            pathParametersPanel.updateFromUrl(url)
+            // Trigger debounced validation and modification detection
             debouncedValidation()
         }
         
@@ -1015,7 +1007,11 @@ class RequestConfigurationPanel(private val project: Project) : JPanel(BorderLay
     private fun buildRequestConfig(): RequestConfig {
         val method = methodComboBox.selectedItem as HttpMethod
         var url = enhancedUrlField.getText().trim()  // Use enhancedUrlField instead of urlTextField
-        
+
+        // Remove query parameters from URL if present
+        // Query parameters will be handled separately via queryParameters field
+        url = url.split("?")[0]
+
         // Apply environment base URL if environment is active and URL is relative
         val currentEnvironment = environmentService.getCurrentEnvironment()
         
