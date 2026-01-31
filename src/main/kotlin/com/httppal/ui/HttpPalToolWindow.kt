@@ -14,6 +14,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.components.*
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import kotlinx.coroutines.launch
 import java.awt.*
 import java.awt.event.ActionEvent
 import java.awt.event.ActionListener
@@ -65,7 +66,11 @@ class HttpPalToolWindow(private val project: Project) {
         // Request tab - main HTTP request interface with request/response sections
         val requestPanel = createRequestPanel()
         tabbedPane.addTab("Request", requestPanel)
-        
+
+        // GraphQL tab
+        val graphQLPanel = createGraphQLPanel()
+        tabbedPane.addTab("GraphQL", graphQLPanel)
+
         // WebSocket tab
         webSocketPanel = WebSocketPanel(project)
         tabbedPane.addTab("WebSocket", webSocketPanel)
@@ -185,7 +190,104 @@ class HttpPalToolWindow(private val project: Project) {
         responseDisplayPanel = ResponseDisplayPanel()
         return responseDisplayPanel
     }
-    
+
+    private fun createGraphQLPanel(): JComponent {
+        val mainPanel = JPanel(BorderLayout())
+
+        // Top panel with environment selection
+        val topPanel = JPanel(BorderLayout())
+        val graphQLEnvSelectionPanel = EnvironmentSelectionPanel(project)
+        topPanel.add(graphQLEnvSelectionPanel, BorderLayout.CENTER)
+        mainPanel.add(topPanel, BorderLayout.NORTH)
+
+        // Three-column layout: Schema Explorer | Request Editor | Response Viewer
+        val leftSplitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
+        leftSplitPane.resizeWeight = 0.2
+
+        // Left: Schema Explorer
+        val schemaExplorer = com.httppal.graphql.ui.GraphQLSchemaExplorer(project)
+
+        // Middle: GraphQL request panel
+        val graphQLRequestPanel = com.httppal.graphql.ui.GraphQLPanel(project)
+
+        // Right: GraphQL response panel
+        val graphQLResponsePanel = com.httppal.graphql.ui.GraphQLResponsePanel(project)
+
+        // Set up callbacks
+        graphQLRequestPanel.setOnExecuteCallback { response ->
+            graphQLResponsePanel.displayResponse(response)
+        }
+
+        graphQLRequestPanel.setOnIntrospectCallback { endpoint ->
+            introspectGraphQLSchema(endpoint, schemaExplorer)
+        }
+
+        // When a field is selected in schema explorer, insert it into the query editor
+        schemaExplorer.setOnFieldSelectedCallback { fieldText ->
+            graphQLRequestPanel.insertTextAtCursor(fieldText)
+        }
+
+        leftSplitPane.leftComponent = schemaExplorer
+        leftSplitPane.rightComponent = graphQLRequestPanel
+
+        val mainSplitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
+        mainSplitPane.resizeWeight = 0.6
+        mainSplitPane.leftComponent = leftSplitPane
+        mainSplitPane.rightComponent = graphQLResponsePanel
+
+        mainPanel.add(mainSplitPane, BorderLayout.CENTER)
+
+        return mainPanel
+    }
+
+    private fun introspectGraphQLSchema(endpoint: String, schemaExplorer: com.httppal.graphql.ui.GraphQLSchemaExplorer) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                val schemaService = service<com.httppal.graphql.service.GraphQLSchemaService>()
+                val schema = schemaService.introspectSchema(endpoint)
+
+                SwingUtilities.invokeLater {
+                    if (schema != null) {
+                        statusLabel.text = "Schema 获取成功 (${schema.types.size} 个类型)"
+                        schemaExplorer.loadSchema(endpoint)
+                        JOptionPane.showMessageDialog(
+                            getContent(),
+                            "Schema 获取成功！\n找到 ${schema.types.size} 个类型。",
+                            "成功",
+                            JOptionPane.INFORMATION_MESSAGE
+                        )
+                    } else {
+                        statusLabel.text = "Schema 获取失败"
+                        JOptionPane.showMessageDialog(
+                            getContent(),
+                            "Schema introspected successfully!\n${schema.types.size} types found.",
+                            "Success",
+                            JOptionPane.INFORMATION_MESSAGE
+                        )
+                    } else {
+                        statusLabel.text = "Schema introspection failed"
+                        JOptionPane.showMessageDialog(
+                            getContent(),
+                            "Failed to introspect schema. Check the endpoint URL and try again.",
+                            "Introspection Failed",
+                            JOptionPane.WARNING_MESSAGE
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                SwingUtilities.invokeLater {
+                    statusLabel.text = "Schema introspection error"
+                    JOptionPane.showMessageDialog(
+                        getContent(),
+                        "Error during introspection: ${e.message}",
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE
+                    )
+                }
+            }
+        }
+    }
+
 
     
     private fun createToolbar(): JComponent {

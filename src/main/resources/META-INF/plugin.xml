@@ -56,7 +56,13 @@
         <!--<applicationService serviceImplementation="com.httppal.service.SettingsExportImportService"/>-->
         <applicationService serviceInterface="com.httppal.service.JMeterExportService"
                            serviceImplementation="com.httppal.service.impl.JMeterExportServiceImpl"/>
-        
+        <applicationService serviceInterface="com.httppal.graphql.service.GraphQLExecutionService"
+                           serviceImplementation="com.httppal.graphql.service.impl.GraphQLExecutionServiceImpl"/>
+        <applicationService serviceInterface="com.httppal.graphql.service.GraphQLSchemaService"
+                           serviceImplementation="com.httppal.graphql.service.impl.GraphQLSchemaServiceImpl"/>
+        <applicationService serviceInterface="com.httppal.graphql.service.GraphQLHistoryService"
+                           serviceImplementation="com.httppal.graphql.service.impl.GraphQLHistoryServiceImpl"/>
+
         <!-- Project Services -->
         <projectService serviceInterface="com.httppal.service.PostmanExportService"
                        serviceImplementation="com.httppal.service.impl.PostmanExportServiceImpl"/>
@@ -78,7 +84,9 @@
                        serviceImplementation="com.httppal.service.impl.SchemaAnalyzerServiceImpl"/>
         <projectService serviceInterface="com.httppal.service.MockDataGeneratorService"
                        serviceImplementation="com.httppal.service.impl.MockDataGeneratorServiceImpl"/>
-        
+        <projectService serviceInterface="com.httppal.graphql.service.GraphQLDiscoveryService"
+                       serviceImplementation="com.httppal.graphql.service.impl.GraphQLDiscoveryServiceImpl"/>
+
         <!-- Tool Window -->
         <toolWindow id="HttpPal" 
                    secondary="false" 

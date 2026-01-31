@@ -43,7 +43,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
 
     implementation("io.swagger.parser.v3:swagger-parser:2.1.37")
-    
+
+    // GraphQL support
+    implementation("com.graphql-java:graphql-java:21.5")
+    // Extended scalars (可选，提供额外的标量类型如 DateTime、JSON 等)
+    // implementation("com.graphql-java:graphql-java-extended-scalars:22.0")
+
     // Mock data generation for HTTP requests
     implementation("net.datafaker:datafaker:2.5.1")
     implementation("com.github.curious-odd-man:rgxgen:2.0") // Regex pattern generation
