@@ -18,8 +18,6 @@ import kotlinx.coroutines.launch
 import java.awt.BorderLayout
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
-import javax.swing.tree.DefaultMutableTreeNode
-import javax.swing.tree.DefaultTreeModel
 
 /**
  * GraphQL Schema Explorer with checkbox-based field selection (Postman-style).
@@ -29,8 +27,6 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
 
     private val logger = Logger.getInstance(GraphQLSchemaExplorer::class.java)
     private var checkboxTree: GraphQLCheckboxTree? = null
-    private val rootNode = DefaultMutableTreeNode("Schema")
-    private val treeModel = DefaultTreeModel(rootNode)
 
     private var currentEndpoint: String? = null
     private var currentSchema: GraphQLSchema? = null

@@ -2,28 +2,24 @@ package com.httppal.graphql.ui
 
 import com.httppal.graphql.model.TypeKind
 import com.intellij.ui.CheckboxTree
-import com.intellij.ui.CheckedTreeNode
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.ui.JBUI
-import java.awt.Component
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JTree
-import javax.swing.tree.DefaultTreeModel
-import javax.swing.tree.TreeCellRenderer
 
 /**
  * Custom tree component with checkbox support for GraphQL field selection.
  * Implements Postman-style checkbox interaction.
  */
-class GraphQLCheckboxTree(root: CheckboxTreeNode) : JTree(DefaultTreeModel(root)) {
+class GraphQLCheckboxTree(root: CheckboxTreeNode) : CheckboxTree(
+    GraphQLCheckboxTreeCellRenderer(),
+    root
+) {
 
     private val checkboxChangeListeners = mutableListOf<(CheckboxTreeNode, CheckboxState) -> Unit>()
 
     init {
-        // Use custom renderer
-        cellRenderer = GraphQLCheckboxTreeCellRenderer()
-
         // Handle checkbox clicks
         addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
@@ -163,13 +159,11 @@ class GraphQLCheckboxTree(root: CheckboxTreeNode) : JTree(DefaultTreeModel(root)
 }
 
 /**
- * Custom cell renderer for checkbox tree.
+ * Custom cell renderer for GraphQL checkbox tree.
  */
-private class GraphQLCheckboxTreeCellRenderer : TreeCellRenderer {
+private class GraphQLCheckboxTreeCellRenderer : CheckboxTree.CheckboxTreeCellRenderer() {
 
-    private val checkboxRenderer = CheckboxTree.CheckboxTreeCellRenderer()
-
-    override fun getTreeCellRendererComponent(
+    override fun customizeRenderer(
         tree: JTree,
         value: Any?,
         selected: Boolean,
@@ -177,27 +171,13 @@ private class GraphQLCheckboxTreeCellRenderer : TreeCellRenderer {
         leaf: Boolean,
         row: Int,
         hasFocus: Boolean
-    ): Component {
+    ) {
         val node = value as? CheckboxTreeNode
 
         if (node != null) {
-            // Configure checkbox state
-            val checked = when (node.checkboxState) {
-                CheckboxState.CHECKED -> true
-                CheckboxState.UNCHECKED -> false
-                CheckboxState.PARTIAL -> false // Will show as indeterminate
-            }
-
-            // Use CheckedTreeNode for rendering
-            val checkedNode = CheckedTreeNode(node.field.name)
-            checkedNode.isChecked = checked
-
-            val component = checkboxRenderer.getTreeCellRendererComponent(
-                tree, checkedNode, selected, expanded, leaf, row, hasFocus
-            )
-
-            // Customize text based on field info
             val field = node.field
+
+            // Build display text
             val text = buildString {
                 append(field.name)
 
@@ -211,20 +191,16 @@ private class GraphQLCheckboxTreeCellRenderer : TreeCellRenderer {
                 }
             }
 
-            checkboxRenderer.textRenderer.clear()
-            checkboxRenderer.textRenderer.append(
+            // Set text with appropriate attributes
+            textRenderer.append(
                 text,
                 if (field.isDeprecated) SimpleTextAttributes.GRAYED_ATTRIBUTES
                 else SimpleTextAttributes.REGULAR_ATTRIBUTES
             )
-
-            return component
+        } else {
+            // Fallback for non-CheckboxTreeNode
+            textRenderer.append(value?.toString() ?: "", SimpleTextAttributes.REGULAR_ATTRIBUTES)
         }
-
-        // Fallback for non-checkbox nodes
-        return checkboxRenderer.getTreeCellRendererComponent(
-            tree, value, selected, expanded, leaf, row, hasFocus
-        )
     }
 
     private fun getTypeName(type: com.httppal.graphql.model.GraphQLType): String {

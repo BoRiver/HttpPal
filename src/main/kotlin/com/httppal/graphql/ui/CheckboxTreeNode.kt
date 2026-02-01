@@ -1,7 +1,7 @@
 package com.httppal.graphql.ui
 
 import com.httppal.graphql.model.GraphQLField
-import javax.swing.tree.DefaultMutableTreeNode
+import com.intellij.ui.CheckedTreeNode
 
 /**
  * Tree node that supports checkbox state for GraphQL field selection.
@@ -10,14 +10,22 @@ import javax.swing.tree.DefaultMutableTreeNode
  * @property fieldPath The path from root to this field (e.g., ["Query", "user", "name"])
  * @property checkboxState Current checkbox state (CHECKED, UNCHECKED, PARTIAL)
  */
-data class CheckboxTreeNode(
+class CheckboxTreeNode(
     val field: GraphQLField,
     val fieldPath: List<String>,
-    var checkboxState: CheckboxState = CheckboxState.UNCHECKED
-) : DefaultMutableTreeNode() {
+    initialCheckboxState: CheckboxState = CheckboxState.UNCHECKED
+) : CheckedTreeNode() {
+
+    var checkboxState: CheckboxState = initialCheckboxState
+        set(value) {
+            field = value
+            // Sync with CheckedTreeNode's isChecked property
+            isChecked = value == CheckboxState.CHECKED
+        }
 
     init {
         userObject = field.name
+        isChecked = initialCheckboxState == CheckboxState.CHECKED
     }
 
     /**
