@@ -236,14 +236,17 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
     private fun handleCheckboxChange(node: CheckboxTreeNode, newState: CheckboxState) {
         if (isSyncingFromEditor) return
 
+        logger.info("Checkbox changed: ${node.field.name} -> $newState")
+
         isSyncingFromCheckboxes = true
 
         try {
             when (newState) {
                 CheckboxState.CHECKED -> {
-                    // Add this node and all descendants to selection
-                    addNodeToSelection(node)
-                    node.getAllDescendants().forEach { addNodeToSelection(it) }
+                    // Add this node to selection (only if it's a leaf field)
+                    if (node.childCount == 0) {
+                        addNodeToSelection(node)
+                    }
                 }
                 CheckboxState.UNCHECKED -> {
                     // Remove this node and all descendants from selection
@@ -251,8 +254,11 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
                 }
                 CheckboxState.PARTIAL -> {
                     // Partial state is calculated, not set directly
+                    // Don't change selections
                 }
             }
+
+            logger.info("Current selections: ${selectionState.getAllSelections().size}")
         } finally {
             isSyncingFromCheckboxes = false
         }
@@ -271,8 +277,13 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
      * Regenerate query from current selections.
      */
     private fun regenerateQuery() {
+        if (isSyncingFromEditor) return
+
         val builder = queryBuilder ?: return
         val query = builder.generateQuery(selectionState)
+
+        logger.info("Generated query: $query")
+
         onQueryUpdatedCallback?.invoke(query)
     }
 

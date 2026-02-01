@@ -2,11 +2,11 @@ package com.httppal.graphql.ui
 
 import com.httppal.graphql.model.TypeKind
 import com.intellij.ui.CheckboxTree
+import com.intellij.ui.CheckedTreeNode
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.ui.JBUI
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import javax.swing.JTree
+import javax.swing.tree.TreePath
 
 /**
  * Custom tree component with checkbox support for GraphQL field selection.
@@ -20,20 +20,6 @@ class GraphQLCheckboxTree(root: CheckboxTreeNode) : CheckboxTree(
     private val checkboxChangeListeners = mutableListOf<(CheckboxTreeNode, CheckboxState) -> Unit>()
 
     init {
-        // Handle checkbox clicks
-        addMouseListener(object : MouseAdapter() {
-            override fun mousePressed(e: MouseEvent) {
-                val path = getPathForLocation(e.x, e.y) ?: return
-                val node = path.lastPathComponent as? CheckboxTreeNode ?: return
-
-                // Check if click is in checkbox area (first 20 pixels)
-                if (e.x < 20) {
-                    toggleCheckbox(node)
-                    e.consume()
-                }
-            }
-        })
-
         // Tree settings
         isRootVisible = true
         showsRootHandles = true
@@ -41,35 +27,44 @@ class GraphQLCheckboxTree(root: CheckboxTreeNode) : CheckboxTree(
     }
 
     /**
-     * Toggle checkbox state for a node.
+     * Override to handle checkbox state changes.
+     * This is called by CheckboxTree when a checkbox is clicked.
      */
-    private fun toggleCheckbox(node: CheckboxTreeNode) {
-        val newState = when (node.checkboxState) {
-            CheckboxState.CHECKED -> CheckboxState.UNCHECKED
-            CheckboxState.UNCHECKED -> CheckboxState.CHECKED
-            CheckboxState.PARTIAL -> CheckboxState.CHECKED
+    override fun onNodeStateChanged(node: CheckedTreeNode) {
+        super.onNodeStateChanged(node)
+
+        if (node is CheckboxTreeNode) {
+            // Determine new state based on isChecked
+            val newState = if (node.isChecked) CheckboxState.CHECKED else CheckboxState.UNCHECKED
+
+            // Update our custom state
+            updateNodeState(node, newState)
+
+            // Notify listeners
+            notifyCheckboxChange(node, newState)
         }
-
-        updateNodeState(node, newState)
-        notifyCheckboxChange(node, newState)
-
-        // Repaint the tree
-        repaint()
     }
 
     /**
      * Update node state and propagate to children and ancestors.
      */
     private fun updateNodeState(node: CheckboxTreeNode, newState: CheckboxState) {
+        // Update this node's state
         node.checkboxState = newState
 
         // Propagate down to all descendants
         if (newState == CheckboxState.CHECKED || newState == CheckboxState.UNCHECKED) {
-            node.getAllDescendants().forEach { it.checkboxState = newState }
+            node.getAllDescendants().forEach { descendant ->
+                descendant.checkboxState = newState
+                descendant.isChecked = (newState == CheckboxState.CHECKED)
+            }
         }
 
         // Propagate up to ancestors
         updateAncestorStates(node)
+
+        // Repaint the tree
+        repaint()
     }
 
     /**
@@ -87,11 +82,15 @@ class GraphQLCheckboxTree(root: CheckboxTreeNode) : CheckboxTree(
             val allChecked = children.all { it.checkboxState == CheckboxState.CHECKED }
             val allUnchecked = children.all { it.checkboxState == CheckboxState.UNCHECKED }
 
-            current.checkboxState = when {
+            val newState = when {
                 allChecked -> CheckboxState.CHECKED
                 allUnchecked -> CheckboxState.UNCHECKED
                 else -> CheckboxState.PARTIAL
             }
+
+            current.checkboxState = newState
+            // For CheckboxTree, set isChecked based on state
+            current.isChecked = (newState == CheckboxState.CHECKED)
 
             current = current.parent as? CheckboxTreeNode
         }
@@ -102,7 +101,19 @@ class GraphQLCheckboxTree(root: CheckboxTreeNode) : CheckboxTree(
      * Used for syncing from query editor.
      */
     fun setCheckboxStateSilently(node: CheckboxTreeNode, state: CheckboxState) {
-        updateNodeState(node, state)
+        node.checkboxState = state
+        node.isChecked = (state == CheckboxState.CHECKED)
+
+        // Also update descendants
+        node.getAllDescendants().forEach { descendant ->
+            descendant.checkboxState = state
+            descendant.isChecked = (state == CheckboxState.CHECKED)
+        }
+
+        // Update ancestors
+        updateAncestorStates(node)
+
+        // Repaint
         repaint()
     }
 
@@ -135,26 +146,68 @@ class GraphQLCheckboxTree(root: CheckboxTreeNode) : CheckboxTree(
     private fun findNodeRecursive(node: CheckboxTreeNode, path: List<String>, depth: Int): CheckboxTreeNode? {
         if (depth >= path.size) return null
 
-        // Check if current node matches
-        if (node.fieldPath.size == depth + 1 && node.fieldPath.last() == path[depth]) {
-            // If this is the last element in path, we found it
-            if (depth == path.size - 1) {
-                return node
+        // Check if current node matches the path at this depth
+        val targetName = path[depth]
+
+        // For root level (Query, Mutation, Subscription), match by name
+        if (depth == 0) {
+            if (node.field.name == targetName) {
+                if (depth == path.size - 1) {
+                    return node
+                }
+                // Search in children for next level
+                for (child in node.getCheckboxChildren()) {
+                    val found = findNodeRecursive(child, path, depth + 1)
+                    if (found != null) return found
+                }
             }
-            // Otherwise, search in children
+            // Also search in children at same depth
             for (child in node.getCheckboxChildren()) {
-                val found = findNodeRecursive(child, path, depth + 1)
+                val found = findNodeRecursive(child, path, depth)
+                if (found != null) return found
+            }
+        } else {
+            // For other levels, match by field name
+            if (node.field.name == targetName) {
+                if (depth == path.size - 1) {
+                    return node
+                }
+                // Search in children for next level
+                for (child in node.getCheckboxChildren()) {
+                    val found = findNodeRecursive(child, path, depth + 1)
+                    if (found != null) return found
+                }
+            }
+            // Search in children at same depth
+            for (child in node.getCheckboxChildren()) {
+                val found = findNodeRecursive(child, path, depth)
                 if (found != null) return found
             }
         }
 
-        // Search in all children
-        for (child in node.getCheckboxChildren()) {
-            val found = findNodeRecursive(child, path, depth)
-            if (found != null) return found
-        }
-
         return null
+    }
+
+    /**
+     * Expand all nodes in the tree.
+     */
+    fun expandAll() {
+        var row = 0
+        while (row < rowCount) {
+            expandRow(row)
+            row++
+        }
+    }
+
+    /**
+     * Collapse all nodes except root.
+     */
+    fun collapseAll() {
+        var row = rowCount - 1
+        while (row > 0) {
+            collapseRow(row)
+            row--
+        }
     }
 }
 

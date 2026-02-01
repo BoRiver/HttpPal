@@ -224,18 +224,21 @@ class HttpPalToolWindow(private val project: Project) {
 
         // Bidirectional sync: Schema Explorer → Query Editor
         schemaExplorer.setOnQueryUpdatedCallback { query ->
+            println("DEBUG: Schema Explorer callback triggered, query length: ${query.length}")
             graphQLRequestPanel.setQuerySilently(query)
         }
 
         // Bidirectional sync: Query Editor → Schema Explorer (with debouncing)
         var syncJob: kotlinx.coroutines.Job? = null
         graphQLRequestPanel.getQueryEditor().addDocumentListener { queryText ->
+            println("DEBUG: Query Editor changed, text length: ${queryText.length}")
             // Cancel previous sync job
             syncJob?.cancel()
             // Schedule new sync with 500ms debounce
             syncJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
                 kotlinx.coroutines.delay(500)
                 SwingUtilities.invokeLater {
+                    println("DEBUG: Syncing to Schema Explorer")
                     schemaExplorer.syncFromQuery(queryText)
                 }
             }
