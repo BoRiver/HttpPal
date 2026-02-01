@@ -35,14 +35,14 @@ class GraphQLMockGenerator(private val schema: GraphQLSchema) {
                 else -> "query"
             }
 
-            appendLine("$operationKeyword SampleQuery {")
+            appendLine("$operationKeyword {")
 
             // 选择前 3 个字段生成示例
             type.fields.take(3).forEach { field ->
-                appendLine("  ${generateFieldSelection(field, depth = 1, maxDepth = maxDepth)}")
+                append(generateFieldSelection(field, depth = 1, maxDepth = maxDepth))
             }
 
-            appendLine("}")
+            append("}")
         }
     }
 
@@ -53,9 +53,10 @@ class GraphQLMockGenerator(private val schema: GraphQLSchema) {
         val indent = "  ".repeat(depth)
 
         return buildString {
+            append(indent)
             append(field.name)
 
-            // 添加参数
+            // 添加参数（只在第一层添加）
             if (field.args.isNotEmpty() && depth == 1) {
                 val argStrings = field.args.take(2).map { arg ->
                     "${arg.name}: ${generateArgumentPlaceholder(arg.type)}"
@@ -70,10 +71,17 @@ class GraphQLMockGenerator(private val schema: GraphQLSchema) {
                 if (typeObj != null && !typeObj.fields.isNullOrEmpty()) {
                     appendLine(" {")
                     typeObj.fields.take(3).forEach { subField ->
-                        appendLine("$indent  ${generateFieldSelection(subField, depth + 1, maxDepth)}")
+                        append(generateFieldSelection(subField, depth + 1, maxDepth))
                     }
-                    append("$indent}")
+                    append(indent)
+                    appendLine("}")
+                } else {
+                    // 标量字段，直接换行
+                    appendLine()
                 }
+            } else {
+                // 标量字段或达到最大深度，直接换行
+                appendLine()
             }
         }
     }

@@ -236,7 +236,7 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
     private fun handleCheckboxChange(node: CheckboxTreeNode, newState: CheckboxState) {
         if (isSyncingFromEditor) return
 
-        logger.info("Checkbox changed: ${node.field.name} -> $newState")
+        logger.info("Checkbox changed: ${node.field.name} -> $newState, path: ${node.fieldPath}")
 
         isSyncingFromCheckboxes = true
 
@@ -245,7 +245,8 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
                 CheckboxState.CHECKED -> {
                     // Add this node to selection (only if it's a leaf field)
                     if (node.childCount == 0) {
-                        addNodeToSelection(node)
+                        // Add the leaf node and all its ancestors
+                        addNodeWithAncestors(node)
                     }
                 }
                 CheckboxState.UNCHECKED -> {
@@ -259,15 +260,28 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
             }
 
             logger.info("Current selections: ${selectionState.getAllSelections().size}")
+            logger.info("Selection paths: ${selectionState.getAllSelections().map { it.fieldPath }}")
         } finally {
             isSyncingFromCheckboxes = false
         }
     }
 
     /**
-     * Add a node to the selection state.
+     * Add a node and all its ancestors to the selection state.
+     * This ensures the complete path is in the selection.
      */
-    private fun addNodeToSelection(node: CheckboxTreeNode) {
+    private fun addNodeWithAncestors(node: CheckboxTreeNode) {
+        // Get all ancestors (from root to this node)
+        val ancestors = node.getAllAncestors().reversed() // Reverse to get root-first order
+
+        // Add all ancestors first
+        for (ancestor in ancestors) {
+            if (ancestor.fieldPath.isNotEmpty()) {
+                selectionState.addSelection(ancestor.fieldPath, ancestor.field)
+            }
+        }
+
+        // Add the node itself
         if (node.fieldPath.isNotEmpty()) {
             selectionState.addSelection(node.fieldPath, node.field)
         }
