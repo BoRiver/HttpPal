@@ -21,12 +21,12 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     private val logger = Logger.getInstance(ProjectSettings::class.java)
     
     data class State(
-        var manualEndpoints: MutableList<EndpointInfo> = mutableListOf(),
+        var manualEndpoints: MutableList<EndpointInfo?> = mutableListOf(),
         var discoveryEnabled: Boolean = true,
         var autoRefreshEndpoints: Boolean = true,
-        var excludedPackages: MutableList<String> = mutableListOf(),
-        var includedPackages: MutableList<String> = mutableListOf(),
-        var environments: MutableList<SerializableEnvironment> = mutableListOf(),
+        var excludedPackages: MutableList<String?> = mutableListOf(),
+        var includedPackages: MutableList<String?> = mutableListOf(),
+        var environments: MutableList<SerializableEnvironment?> = mutableListOf(),
         var currentEnvironmentId: String? = null
     )
     
@@ -41,27 +41,27 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
         logger.info("ProjectSettings.loadState() called: environments=${state.environments.size}, currentEnvId=${state.currentEnvironmentId}")
 
         // Clean up any null values that may have been persisted
-        state.manualEndpoints.removeIf { it == null }
-        state.environments.removeIf { it == null }
-        state.excludedPackages.removeIf { it == null }
-        state.includedPackages.removeIf { it == null }
+        state.manualEndpoints.removeAll { it == null }
+        state.environments.removeAll { it == null }
+        state.excludedPackages.removeAll { it == null }
+        state.includedPackages.removeAll { it == null }
 
         myState = state
         logger.info("ProjectSettings state loaded successfully")
     }
     
     // Manual Endpoints
-    fun getManualEndpoints(): List<EndpointInfo> = myState.manualEndpoints.toList()
+    fun getManualEndpoints(): List<EndpointInfo> = myState.manualEndpoints.filterNotNull()
     
     fun addManualEndpoint(endpoint: EndpointInfo) {
         // Handle potential null values in the list
-        myState.manualEndpoints.removeIf { it != null && it.id == endpoint.id }
+        myState.manualEndpoints.removeAll { it != null && it.id == endpoint.id }
         myState.manualEndpoints.add(endpoint)
     }
 
     fun removeManualEndpoint(endpointId: String) {
         // Handle potential null values in the list
-        myState.manualEndpoints.removeIf { it != null && it.id == endpointId }
+        myState.manualEndpoints.removeAll { it != null && it.id == endpointId }
     }
 
     fun updateManualEndpoint(endpoint: EndpointInfo) {
@@ -86,7 +86,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     }
     
     // Package Filtering
-    fun getExcludedPackages(): List<String> = myState.excludedPackages.toList()
+    fun getExcludedPackages(): List<String> = myState.excludedPackages.filterNotNull()
     
     fun addExcludedPackage(packageName: String) {
         if (!myState.excludedPackages.contains(packageName)) {
@@ -98,7 +98,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
         myState.excludedPackages.remove(packageName)
     }
     
-    fun getIncludedPackages(): List<String> = myState.includedPackages.toList()
+    fun getIncludedPackages(): List<String> = myState.includedPackages.filterNotNull()
     
     fun addIncludedPackage(packageName: String) {
         if (!myState.includedPackages.contains(packageName)) {
@@ -112,16 +112,16 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     
     // Package filtering utilities
     fun isPackageExcluded(packageName: String): Boolean {
-        return myState.excludedPackages.any { excluded ->
+        return myState.excludedPackages.filterNotNull().any { excluded ->
             packageName.startsWith(excluded)
         }
     }
     
     fun isPackageIncluded(packageName: String): Boolean {
-        if (myState.includedPackages.isEmpty()) {
+        if (myState.includedPackages.filterNotNull().isEmpty()) {
             return true // If no includes specified, all packages are included
         }
-        return myState.includedPackages.any { included ->
+        return myState.includedPackages.filterNotNull().any { included ->
             packageName.startsWith(included)
         }
     }
@@ -160,7 +160,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
 
             // Remove existing environment with same ID and add new one
             // Handle potential null values in the list
-            myState.environments.removeIf { it != null && it.id == environment.id }
+            myState.environments.removeAll { it != null && it.id == environment.id }
             myState.environments.add(serializable)
 
             logger.info("Environment persisted successfully: id=${environment.id}, name=${environment.name}, total environments: ${myState.environments.size}")
@@ -173,7 +173,7 @@ class ProjectSettings : PersistentStateComponent<ProjectSettings.State> {
     fun removeEnvironment(environmentId: String) {
         logger.info("removeEnvironment() called: id=$environmentId")
         // Handle potential null values in the list
-        val removed = myState.environments.removeIf { it != null && it.id == environmentId }
+        val removed = myState.environments.removeAll { it != null && it.id == environmentId }
         if (myState.currentEnvironmentId == environmentId) {
             myState.currentEnvironmentId = null
         }

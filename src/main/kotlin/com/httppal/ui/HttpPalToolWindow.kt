@@ -260,11 +260,11 @@ class HttpPalToolWindow(private val project: Project) {
                         statusLabel.text = "Schema 获取失败"
                         JOptionPane.showMessageDialog(
                             getContent(),
-                            "Schema introspected successfully!\n${schema.types.size} types found.",
+                            "Schema introspected types found.",
                             "Success",
                             JOptionPane.INFORMATION_MESSAGE
                         )
-                    } else {
+                    } /*else {
                         statusLabel.text = "Schema introspection failed"
                         JOptionPane.showMessageDialog(
                             getContent(),
@@ -272,7 +272,7 @@ class HttpPalToolWindow(private val project: Project) {
                             "Introspection Failed",
                             JOptionPane.WARNING_MESSAGE
                         )
-                    }
+                    }*/
                 }
             } catch (e: Exception) {
                 SwingUtilities.invokeLater {
