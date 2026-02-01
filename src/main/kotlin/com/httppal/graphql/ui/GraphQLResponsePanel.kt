@@ -3,6 +3,7 @@ package com.httppal.graphql.ui
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.httppal.graphql.model.GraphQLResponse
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -95,9 +96,12 @@ class GraphQLResponsePanel(private val project: Project) : JPanel(BorderLayout()
             "(No data)"
         }
 
-        dataEditor.document.setReadOnly(false)
-        dataEditor.document.setText(dataText)
-        dataEditor.document.setReadOnly(true)
+        WriteCommandAction.runWriteCommandAction(project) {
+            dataEditor.document.setReadOnly(false)
+            // Normalize line separators to \n for IntelliJ Platform
+            dataEditor.document.setText(dataText.replace("\r\n", "\n"))
+            dataEditor.document.setReadOnly(true)
+        }
 
         // Display errors
         val errorsText = if (response.errors != null && response.errors.isNotEmpty()) {
@@ -123,9 +127,12 @@ class GraphQLResponsePanel(private val project: Project) : JPanel(BorderLayout()
             "(No errors)"
         }
 
-        errorsEditor.document.setReadOnly(false)
-        errorsEditor.document.setText(errorsText)
-        errorsEditor.document.setReadOnly(true)
+        WriteCommandAction.runWriteCommandAction(project) {
+            errorsEditor.document.setReadOnly(false)
+            // Normalize line separators to \n for IntelliJ Platform
+            errorsEditor.document.setText(errorsText.replace("\r\n", "\n"))
+            errorsEditor.document.setReadOnly(true)
+        }
 
         // Auto-switch to errors tab if there are errors
         if (response.hasErrors()) {
@@ -140,12 +147,14 @@ class GraphQLResponsePanel(private val project: Project) : JPanel(BorderLayout()
      */
     fun clear() {
         statusLabel.text = ""
-        dataEditor.document.setReadOnly(false)
-        dataEditor.document.setText("")
-        dataEditor.document.setReadOnly(true)
-        errorsEditor.document.setReadOnly(false)
-        errorsEditor.document.setText("")
-        errorsEditor.document.setReadOnly(true)
+        WriteCommandAction.runWriteCommandAction(project) {
+            dataEditor.document.setReadOnly(false)
+            dataEditor.document.setText("")
+            dataEditor.document.setReadOnly(true)
+            errorsEditor.document.setReadOnly(false)
+            errorsEditor.document.setText("")
+            errorsEditor.document.setReadOnly(true)
+        }
         tabbedPane.selectedIndex = 0
     }
 

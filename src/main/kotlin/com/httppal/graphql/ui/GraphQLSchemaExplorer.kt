@@ -1,88 +1,89 @@
 package com.httppal.graphql.ui
 
+import com.httppal.graphql.builder.GraphQLQueryBuilder
 import com.httppal.graphql.model.*
+import com.httppal.graphql.parser.GraphQLQueryParser
 import com.httppal.graphql.service.GraphQLSchemaService
+import com.httppal.graphql.state.GraphQLFieldSelectionState
 import com.httppal.util.HttpPalBundle
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.BorderLayout
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 
 /**
- * GraphQL Schema 浏览器 - 树形视图显示 schema 中的类型和字段
+ * GraphQL Schema Explorer with checkbox-based field selection (Postman-style).
+ * Supports bidirectional sync between checkboxes and query editor.
  */
 class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout()) {
 
     private val logger = Logger.getInstance(GraphQLSchemaExplorer::class.java)
-    private val tree: Tree
+    private var checkboxTree: GraphQLCheckboxTree? = null
     private val rootNode = DefaultMutableTreeNode("Schema")
     private val treeModel = DefaultTreeModel(rootNode)
 
     private var currentEndpoint: String? = null
-    private var onFieldSelectedCallback: ((String) -> Unit)? = null
+    private var currentSchema: GraphQLSchema? = null
+    private val selectionState = GraphQLFieldSelectionState()
+    private var queryBuilder: GraphQLQueryBuilder? = null
+    private var queryParser: GraphQLQueryParser? = null
+
+    // Callbacks
+    private var onQueryUpdatedCallback: ((String) -> Unit)? = null
+
+    // Sync flags to prevent loops
+    private var isSyncingFromCheckboxes = false
+    private var isSyncingFromEditor = false
 
     init {
-        // 创建树
-        tree = Tree(treeModel)
-        tree.isRootVisible = true
-        tree.showsRootHandles = true
-
-        // 添加双击监听器 - 双击字段时插入到查询编辑器
-        tree.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2) {
-                    handleDoubleClick()
-                }
-            }
-        })
-
-        // 布局
+        // Layout
         border = JBUI.Borders.empty(5)
 
-        val scrollPane = JBScrollPane(tree)
-        add(scrollPane, BorderLayout.CENTER)
-
-        // 顶部标签
+        // Title label
         val titleLabel = JBLabel(HttpPalBundle.message("graphql.schema.title"))
         titleLabel.border = JBUI.Borders.empty(0, 0, 5, 0)
         add(titleLabel, BorderLayout.NORTH)
 
-        // 显示初始状态
+        // Show initial state
         showEmptyState()
+
+        // Listen to selection changes
+        selectionState.addListener { selections ->
+            if (!isSyncingFromEditor) {
+                regenerateQuery()
+            }
+        }
     }
 
     /**
-     * 为指定端点加载 schema
+     * Load schema for the specified endpoint.
      */
     fun loadSchema(endpoint: String) {
         this.currentEndpoint = endpoint
 
         val schemaService = service<GraphQLSchemaService>()
 
-        // 先尝试从缓存获取
+        // Try to get from cache first
         val cachedSchema = schemaService.getCachedSchema(endpoint)
         if (cachedSchema != null) {
             displaySchema(cachedSchema)
             return
         }
 
-        // 如果没有缓存，显示提示信息
+        // Show loading state
         showLoadingState()
 
-        // 在后台线程获取 schema
+        // Fetch schema in background
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val schema = schemaService.introspectSchema(endpoint)
@@ -104,235 +105,282 @@ class GraphQLSchemaExplorer(private val project: Project) : JPanel(BorderLayout(
     }
 
     /**
-     * 显示 schema 内容
+     * Display schema content with checkbox tree.
      */
     private fun displaySchema(schema: GraphQLSchema) {
-        rootNode.removeAllChildren()
-        rootNode.userObject = "Schema (${schema.types.size} types)"
+        this.currentSchema = schema
+        this.queryBuilder = GraphQLQueryBuilder(schema)
+        this.queryParser = GraphQLQueryParser(schema)
 
-        // 添加 Query 类型
+        // Create root node for checkbox tree
+        val checkboxRoot = CheckboxTreeNode(
+            field = GraphQLField(
+                name = "Schema (${schema.types.size} types)",
+                type = GraphQLType(name = "Schema", kind = TypeKind.OBJECT)
+            ),
+            fieldPath = emptyList()
+        )
+
+        // Add Query type
         val queryType = schema.types.find { it.name == schema.queryType }
         if (queryType != null) {
-            val queryNode = DefaultMutableTreeNode("Query")
-            queryType.fields?.forEach { field ->
-                val fieldNode = createFieldNode(field)
-                queryNode.add(fieldNode)
-            }
-            rootNode.add(queryNode)
+            val queryNode = createOperationNode("Query", queryType, listOf("Query"))
+            checkboxRoot.add(queryNode)
         }
 
-        // 添加 Mutation 类型
+        // Add Mutation type
         if (schema.mutationType != null) {
             val mutationType = schema.types.find { it.name == schema.mutationType }
             if (mutationType != null) {
-                val mutationNode = DefaultMutableTreeNode("Mutation")
-                mutationType.fields?.forEach { field ->
-                    val fieldNode = createFieldNode(field)
-                    mutationNode.add(fieldNode)
-                }
-                rootNode.add(mutationNode)
+                val mutationNode = createOperationNode("Mutation", mutationType, listOf("Mutation"))
+                checkboxRoot.add(mutationNode)
             }
         }
 
-        // 添加 Subscription 类型
+        // Add Subscription type
         if (schema.subscriptionType != null) {
             val subscriptionType = schema.types.find { it.name == schema.subscriptionType }
             if (subscriptionType != null) {
-                val subscriptionNode = DefaultMutableTreeNode("Subscription")
-                subscriptionType.fields?.forEach { field ->
-                    val fieldNode = createFieldNode(field)
-                    subscriptionNode.add(fieldNode)
-                }
-                rootNode.add(subscriptionNode)
+                val subscriptionNode = createOperationNode("Subscription", subscriptionType, listOf("Subscription"))
+                checkboxRoot.add(subscriptionNode)
             }
         }
 
-        // 添加其他自定义类型（可选，用于浏览完整 schema）
-        val customTypesNode = DefaultMutableTreeNode("Custom Types")
-        schema.types
-            .filter { it.kind == TypeKind.OBJECT &&
-                     it.name != schema.queryType &&
-                     it.name != schema.mutationType &&
-                     it.name != schema.subscriptionType &&
-                     !it.name.startsWith("__") // 跳过内部类型
-            }
-            .sortedBy { it.name }
-            .forEach { type ->
-                val typeNode = DefaultMutableTreeNode(type.name)
-                type.fields?.forEach { field ->
-                    typeNode.add(createFieldNode(field))
-                }
-                customTypesNode.add(typeNode)
-            }
-
-        if (customTypesNode.childCount > 0) {
-            rootNode.add(customTypesNode)
+        // Create checkbox tree
+        val newTree = GraphQLCheckboxTree(checkboxRoot)
+        newTree.addCheckboxChangeListener { node, newState ->
+            handleCheckboxChange(node, newState)
         }
 
-        // 刷新树
-        treeModel.reload()
+        // Replace old tree
+        removeAll()
+        val titleLabel = JBLabel(HttpPalBundle.message("graphql.schema.title"))
+        titleLabel.border = JBUI.Borders.empty(0, 0, 5, 0)
+        add(titleLabel, BorderLayout.NORTH)
 
-        // 默认展开 Query 节点
-        if (rootNode.childCount > 0) {
-            tree.expandRow(0) // 展开根节点
-            tree.expandRow(1) // 展开 Query 节点
+        val scrollPane = JBScrollPane(newTree)
+        add(scrollPane, BorderLayout.CENTER)
+
+        this.checkboxTree = newTree
+
+        // Expand root and Query nodes
+        newTree.expandRow(0)
+        if (checkboxRoot.childCount > 0) {
+            newTree.expandRow(1)
         }
+
+        revalidate()
+        repaint()
     }
 
     /**
-     * 创建字段节点
+     * Create an operation node (Query/Mutation/Subscription).
      */
-    private fun createFieldNode(field: GraphQLField): DefaultMutableTreeNode {
-        val fieldInfo = buildString {
-            append(field.name)
+    private fun createOperationNode(
+        operationName: String,
+        operationType: GraphQLType,
+        path: List<String>
+    ): CheckboxTreeNode {
+        val operationNode = CheckboxTreeNode(
+            field = GraphQLField(
+                name = operationName,
+                type = operationType
+            ),
+            fieldPath = path
+        )
 
-            // 添加参数
-            if (field.args.isNotEmpty()) {
-                append("(")
-                append(field.args.joinToString(", ") { arg ->
-                    "${arg.name}: ${getTypeName(arg.type)}"
-                })
-                append(")")
-            }
-
-            // 添加返回类型
-            append(": ${getTypeName(field.type)}")
-
-            // 标记弃用
-            if (field.isDeprecated) {
-                append(" [已弃用]")
-            }
+        // Add fields
+        operationType.fields?.forEach { field ->
+            val fieldNode = createFieldNode(field, path + field.name, operationType)
+            operationNode.add(fieldNode)
         }
 
-        val node = DefaultMutableTreeNode(FieldNodeData(field, fieldInfo))
+        return operationNode
+    }
 
-        // 添加描述作为子节点（如果有）
-        if (!field.description.isNullOrBlank()) {
-            node.add(DefaultMutableTreeNode("📝 ${field.description}"))
+    /**
+     * Create a field node recursively.
+     */
+    private fun createFieldNode(
+        field: GraphQLField,
+        fieldPath: List<String>,
+        parentType: GraphQLType
+    ): CheckboxTreeNode {
+        val node = CheckboxTreeNode(
+            field = field,
+            fieldPath = fieldPath
+        )
+
+        // Add child fields if this is an object type
+        val unwrappedType = unwrapType(field.type)
+        val fieldType = currentSchema?.types?.find { it.name == unwrappedType.name }
+        if (fieldType != null && fieldType.kind == TypeKind.OBJECT) {
+            fieldType.fields?.forEach { childField ->
+                val childNode = createFieldNode(childField, fieldPath + childField.name, fieldType)
+                node.add(childNode)
+            }
         }
 
         return node
     }
 
     /**
-     * 获取类型名称的简化表示
+     * Unwrap type to get the underlying type.
      */
-    private fun getTypeName(type: GraphQLType): String {
+    private fun unwrapType(type: GraphQLType): GraphQLType {
         return when (type.kind) {
-            TypeKind.NON_NULL -> "${getTypeName(type.ofType!!)}!"
-            TypeKind.LIST -> "[${getTypeName(type.ofType!!)}]"
-            else -> type.name
+            TypeKind.NON_NULL, TypeKind.LIST -> type.ofType?.let { unwrapType(it) } ?: type
+            else -> type
         }
     }
 
     /**
-     * 处理双击事件
+     * Handle checkbox state change.
      */
-    private fun handleDoubleClick() {
-        val selectedNode = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
-        val userObject = selectedNode.userObject
+    private fun handleCheckboxChange(node: CheckboxTreeNode, newState: CheckboxState) {
+        if (isSyncingFromEditor) return
 
-        if (userObject is FieldNodeData) {
-            val field = userObject.field
-            val fieldText = buildFieldText(field)
-            onFieldSelectedCallback?.invoke(fieldText)
+        isSyncingFromCheckboxes = true
+
+        try {
+            when (newState) {
+                CheckboxState.CHECKED -> {
+                    // Add this node and all descendants to selection
+                    addNodeToSelection(node)
+                    node.getAllDescendants().forEach { addNodeToSelection(it) }
+                }
+                CheckboxState.UNCHECKED -> {
+                    // Remove this node and all descendants from selection
+                    selectionState.removeSelectionsWithPrefix(node.fieldPath)
+                }
+                CheckboxState.PARTIAL -> {
+                    // Partial state is calculated, not set directly
+                }
+            }
+        } finally {
+            isSyncingFromCheckboxes = false
         }
     }
 
     /**
-     * 构建要插入的字段文本
+     * Add a node to the selection state.
      */
-    private fun buildFieldText(field: GraphQLField): String {
-        return buildString {
-            append(field.name)
-
-            // 如果有参数，添加参数占位符
-            if (field.args.isNotEmpty()) {
-                append("(")
-                append(field.args.joinToString(", ") { arg ->
-                    "${arg.name}: ${getDefaultValuePlaceholder(arg.type)}"
-                })
-                append(")")
-            }
-
-            // 如果返回对象类型，添加字段选择占位符
-            if (field.type.kind == TypeKind.OBJECT ||
-                (field.type.kind == TypeKind.NON_NULL && field.type.ofType?.kind == TypeKind.OBJECT) ||
-                (field.type.kind == TypeKind.LIST && field.type.ofType?.kind == TypeKind.OBJECT)) {
-                append(" {\n  # 在此添加字段\n}")
-            }
+    private fun addNodeToSelection(node: CheckboxTreeNode) {
+        if (node.fieldPath.isNotEmpty()) {
+            selectionState.addSelection(node.fieldPath, node.field)
         }
     }
 
     /**
-     * 获取参数的默认值占位符
+     * Regenerate query from current selections.
      */
-    private fun getDefaultValuePlaceholder(type: GraphQLType): String {
-        return when (type.kind) {
-            TypeKind.SCALAR -> when (type.name) {
-                "Int" -> "0"
-                "Float" -> "0.0"
-                "String" -> "\"\""
-                "Boolean" -> "false"
-                "ID" -> "\"id\""
-                else -> "null"
+    private fun regenerateQuery() {
+        val builder = queryBuilder ?: return
+        val query = builder.generateQuery(selectionState)
+        onQueryUpdatedCallback?.invoke(query)
+    }
+
+    /**
+     * Sync checkbox states from query text.
+     * Called when the query editor is modified.
+     */
+    fun syncFromQuery(queryText: String) {
+        if (isSyncingFromCheckboxes) return
+
+        isSyncingFromEditor = true
+
+        try {
+            val parser = queryParser ?: return
+            val tree = checkboxTree ?: return
+
+            // Parse query to get field paths
+            val fieldPaths = parser.parse(queryText)
+
+            // Clear current selections
+            selectionState.clear()
+
+            // Update selections and checkbox states
+            for (fieldPath in fieldPaths) {
+                // Find the node
+                val node = tree.findNodeByPath(fieldPath)
+                if (node != null) {
+                    // Add to selection
+                    selectionState.addSelection(fieldPath, node.field)
+
+                    // Update checkbox state
+                    tree.setCheckboxStateSilently(node, CheckboxState.CHECKED)
+                }
             }
-            TypeKind.NON_NULL -> getDefaultValuePlaceholder(type.ofType!!)
-            TypeKind.LIST -> "[]"
-            TypeKind.ENUM -> "ENUM_VALUE"
-            else -> "null"
+        } finally {
+            isSyncingFromEditor = false
         }
     }
 
     /**
-     * 显示空状态
+     * Show empty state.
      */
     private fun showEmptyState() {
-        rootNode.removeAllChildren()
-        rootNode.userObject = HttpPalBundle.message("graphql.schema.no.schema")
-        treeModel.reload()
+        removeAll()
+        val titleLabel = JBLabel(HttpPalBundle.message("graphql.schema.title"))
+        titleLabel.border = JBUI.Borders.empty(0, 0, 5, 0)
+        add(titleLabel, BorderLayout.NORTH)
+
+        val emptyLabel = JBLabel(HttpPalBundle.message("graphql.schema.no.schema"))
+        emptyLabel.border = JBUI.Borders.empty(10)
+        add(emptyLabel, BorderLayout.CENTER)
+
+        revalidate()
+        repaint()
     }
 
     /**
-     * 显示加载状态
+     * Show loading state.
      */
     private fun showLoadingState() {
-        rootNode.removeAllChildren()
-        rootNode.userObject = HttpPalBundle.message("graphql.schema.loading")
-        treeModel.reload()
+        removeAll()
+        val titleLabel = JBLabel(HttpPalBundle.message("graphql.schema.title"))
+        titleLabel.border = JBUI.Borders.empty(0, 0, 5, 0)
+        add(titleLabel, BorderLayout.NORTH)
+
+        val loadingLabel = JBLabel(HttpPalBundle.message("graphql.schema.loading"))
+        loadingLabel.border = JBUI.Borders.empty(10)
+        add(loadingLabel, BorderLayout.CENTER)
+
+        revalidate()
+        repaint()
     }
 
     /**
-     * 显示错误状态
+     * Show error state.
      */
     private fun showErrorState() {
-        rootNode.removeAllChildren()
-        rootNode.userObject = HttpPalBundle.message("graphql.introspect.failed")
-        treeModel.reload()
+        removeAll()
+        val titleLabel = JBLabel(HttpPalBundle.message("graphql.schema.title"))
+        titleLabel.border = JBUI.Borders.empty(0, 0, 5, 0)
+        add(titleLabel, BorderLayout.NORTH)
+
+        val errorLabel = JBLabel(HttpPalBundle.message("graphql.introspect.failed"))
+        errorLabel.border = JBUI.Borders.empty(10)
+        add(errorLabel, BorderLayout.CENTER)
+
+        revalidate()
+        repaint()
     }
 
     /**
-     * 清空 schema
+     * Clear schema.
      */
     fun clear() {
         currentEndpoint = null
+        currentSchema = null
+        selectionState.clear()
         showEmptyState()
     }
 
     /**
-     * 设置字段选择回调
+     * Set callback for query updates (checkbox → query editor).
      */
-    fun setOnFieldSelectedCallback(callback: (String) -> Unit) {
-        this.onFieldSelectedCallback = callback
-    }
-
-    /**
-     * 字段节点数据
-     */
-    private data class FieldNodeData(
-        val field: GraphQLField,
-        val displayText: String
-    ) {
-        override fun toString(): String = displayText
+    fun setOnQueryUpdatedCallback(callback: (String) -> Unit) {
+        this.onQueryUpdatedCallback = callback
     }
 }

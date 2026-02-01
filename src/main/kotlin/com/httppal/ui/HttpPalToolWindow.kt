@@ -222,9 +222,23 @@ class HttpPalToolWindow(private val project: Project) {
             introspectGraphQLSchema(endpoint, schemaExplorer)
         }
 
-        // When a field is selected in schema explorer, insert it into the query editor
-        schemaExplorer.setOnFieldSelectedCallback { fieldText ->
-            graphQLRequestPanel.insertTextAtCursor(fieldText)
+        // Bidirectional sync: Schema Explorer → Query Editor
+        schemaExplorer.setOnQueryUpdatedCallback { query ->
+            graphQLRequestPanel.setQuerySilently(query)
+        }
+
+        // Bidirectional sync: Query Editor → Schema Explorer (with debouncing)
+        var syncJob: kotlinx.coroutines.Job? = null
+        graphQLRequestPanel.getQueryEditor().addDocumentListener { queryText ->
+            // Cancel previous sync job
+            syncJob?.cancel()
+            // Schedule new sync with 500ms debounce
+            syncJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                kotlinx.coroutines.delay(500)
+                SwingUtilities.invokeLater {
+                    schemaExplorer.syncFromQuery(queryText)
+                }
+            }
         }
 
         leftSplitPane.leftComponent = schemaExplorer

@@ -1,5 +1,6 @@
 package com.httppal.graphql.ui
 
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -52,14 +53,19 @@ class GraphQLVariablesEditor(private val project: Project) : JPanel(BorderLayout
      * Set the variables text.
      */
     fun setText(text: String) {
-        editor.document.setText(text)
+        WriteCommandAction.runWriteCommandAction(project) {
+            // Normalize line separators to \n for IntelliJ Platform
+            editor.document.setText(text.replace("\r\n", "\n"))
+        }
     }
 
     /**
      * Clear the variables text.
      */
     fun clear() {
-        editor.document.setText("")
+        WriteCommandAction.runWriteCommandAction(project) {
+            editor.document.setText("")
+        }
     }
 
     /**

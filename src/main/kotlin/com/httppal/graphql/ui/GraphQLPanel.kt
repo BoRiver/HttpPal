@@ -430,6 +430,18 @@ class GraphQLPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     /**
+     * Get the query editor component.
+     */
+    fun getQueryEditor(): GraphQLQueryEditor = queryEditor
+
+    /**
+     * Set the query text silently without triggering listeners.
+     */
+    fun setQuerySilently(query: String) {
+        queryEditor.setTextSilently(query)
+    }
+
+    /**
      * Dispose the editors when the panel is no longer needed.
      */
     fun dispose() {

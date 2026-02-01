@@ -1,6 +1,10 @@
 package com.httppal.graphql.ui
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.fileTypes.FileTypes
@@ -19,13 +23,18 @@ class GraphQLQueryEditor(private val project: Project) : JPanel(BorderLayout()) 
 
     private val editor: EditorEx
     private var completionCallback: ((String, Int) -> Unit)? = null
+    private val documentListeners = mutableListOf<(String) -> Unit>()
+    private var isSilentUpdate = false
 
     init {
         editor = createEditor()
         add(editor.component, BorderLayout.CENTER)
 
-        // 添加键盘监听器以支持自动补全
+        // Add keyboard listener for auto-completion
         setupCompletionTrigger()
+
+        // Add document listener for text changes
+        setupDocumentListener()
     }
 
     private fun createEditor(): EditorEx {
@@ -83,6 +92,34 @@ class GraphQLQueryEditor(private val project: Project) : JPanel(BorderLayout()) 
     }
 
     /**
+     * Setup document listener to notify when text changes.
+     */
+    private fun setupDocumentListener() {
+        editor.document.addDocumentListener(object : DocumentListener {
+            override fun documentChanged(event: DocumentEvent) {
+                if (!isSilentUpdate) {
+                    val text = editor.document.text
+                    documentListeners.forEach { it(text) }
+                }
+            }
+        })
+    }
+
+    /**
+     * Add a document change listener.
+     */
+    fun addDocumentListener(listener: (String) -> Unit) {
+        documentListeners.add(listener)
+    }
+
+    /**
+     * Remove a document change listener.
+     */
+    fun removeDocumentListener(listener: (String) -> Unit) {
+        documentListeners.remove(listener)
+    }
+
+    /**
      * 设置自动补全回调
      */
     fun setCompletionCallback(callback: (String, Int) -> Unit) {
@@ -100,24 +137,48 @@ class GraphQLQueryEditor(private val project: Project) : JPanel(BorderLayout()) 
      * Set the query text.
      */
     fun setText(text: String) {
-        editor.document.setText(text)
+        WriteCommandAction.runWriteCommandAction(project) {
+            // Normalize line separators to \n for IntelliJ Platform
+            editor.document.setText(text.replace("\r\n", "\n"))
+        }
+    }
+
+    /**
+     * Set the query text silently without triggering document listeners.
+     * Used for syncing from schema explorer to avoid loops.
+     */
+    fun setTextSilently(text: String) {
+        isSilentUpdate = true
+        try {
+            WriteCommandAction.runWriteCommandAction(project) {
+                // Normalize line separators to \n for IntelliJ Platform
+                editor.document.setText(text.replace("\r\n", "\n"))
+            }
+        } finally {
+            isSilentUpdate = false
+        }
     }
 
     /**
      * Clear the query text.
      */
     fun clear() {
-        editor.document.setText("")
+        WriteCommandAction.runWriteCommandAction(project) {
+            editor.document.setText("")
+        }
     }
 
     /**
      * Insert text at the current cursor position.
      */
     fun insertTextAtCursor(text: String) {
-        val caretModel = editor.caretModel
-        val offset = caretModel.offset
-        editor.document.insertString(offset, text)
-        caretModel.moveToOffset(offset + text.length)
+        WriteCommandAction.runWriteCommandAction(project) {
+            val caretModel = editor.caretModel
+            val offset = caretModel.offset
+            // Normalize line separators to \n for IntelliJ Platform
+            editor.document.insertString(offset, text.replace("\r\n", "\n"))
+            caretModel.moveToOffset(offset + text.replace("\r\n", "\n").length)
+        }
     }
 
     /**
